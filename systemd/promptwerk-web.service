@@ -1,0 +1,21 @@
+# Copy to /etc/systemd/system/, replace YOUR_USER and /path/to/promptwerk, then:
+#   systemctl daemon-reload && systemctl enable --now promptwerk-web
+[Unit]
+Description=Promptwerk web UI
+After=network.target
+
+[Service]
+Type=simple
+User=YOUR_USER
+WorkingDirectory=/path/to/promptwerk
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 /path/to/promptwerk/web/server.py
+Restart=always
+RestartSec=5
+# Stop only the server, not its children: a running planner call takes minutes and costs money.
+KillMode=process
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

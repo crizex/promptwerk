@@ -1,0 +1,54 @@
+{
+  "topic": "Due dates for todos, with overdue items shown in red",
+  "rationale": "Two runs. A read run first maps where todos are stored, rendered and tested, so the build run starts from facts instead of guesses. The build run then adds an optional due date to the model, the form and the list, marks overdue items and covers both with tests. One perspective each is enough; the change is small and well bounded.",
+  "clarifications": [
+    {
+      "question": "Should a due date include a time, or only a day?",
+      "why": "A time needs a time zone decision and a different input; a day does not.",
+      "options": ["Day only", "Day and time"],
+      "assumption": "Day only",
+      "blocking": false
+    }
+  ],
+  "runs": [
+    {
+      "id": "map-todos",
+      "title": "Map how todos are stored, rendered and tested",
+      "cwd": "/home/you/code/todo-app",
+      "mode": "read",
+      "effort": "medium",
+      "budget_usd": 2,
+      "needs": [],
+      "artifacts": ["docs/due-dates-map.md"],
+      "acceptance": [
+        "The map names the file and function that stores a todo",
+        "The map names where the list is rendered and how tests are run"
+      ],
+      "check": null,
+      "post_run": null,
+      "personas": [],
+      "tools": [],
+      "prompt": "# Task\nFind where todos are defined, stored, rendered and tested in this repo. Write the findings to docs/due-dates-map.md: file paths, function names, the test command and anything that would make adding a due date risky.\n\n# Output\nOnly docs/due-dates-map.md. Change nothing else."
+    },
+    {
+      "id": "add-due-dates",
+      "title": "Add an optional due date and mark overdue todos",
+      "cwd": "/home/you/code/todo-app",
+      "mode": "build",
+      "effort": "high",
+      "budget_usd": 6,
+      "needs": ["map-todos"],
+      "artifacts": ["docs/due-dates-report.md"],
+      "acceptance": [
+        "A todo can be saved with and without a due date",
+        "A todo whose due date is before today is shown in red",
+        "Tests cover both cases and pass"
+      ],
+      "check": "test -f docs/due-dates-report.md",
+      "post_run": null,
+      "personas": [],
+      "tools": [],
+      "prompt": "# Task\nRead docs/due-dates-map.md first. Add an optional due date (day only) to the todo model, the add form and the list. Mark todos whose due date is before today in red. Add tests for saving with and without a date and for the overdue marker.\n\n# Scope limit\nOnly the todo model, form, list and their tests. No restyling, no new dependencies.\n\n# Not fixed\nIf you notice unrelated defects, list them under 'Not fixed' in docs/due-dates-report.md instead of changing them.\n\n# Report\nWrite docs/due-dates-report.md: what changed, how to try it, the test output."
+    }
+  ]
+}

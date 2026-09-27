@@ -1,0 +1,9 @@
+config.toml
+knowledge/house-rules.md
+knowledge/tools.json
+knowledge/projects/*.md
+!knowledge/projects/README.md
+__pycache__/
+*.pyc
+/data/
+.env*

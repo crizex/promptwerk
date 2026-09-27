@@ -1,0 +1,52 @@
+# Promptwerk configuration. Copy to config.toml (gitignored) and adjust.
+# Every value here is also the built-in default, except `projects`, which you must fill.
+
+# Where drafts, queue, runs, logs and attachments live.
+data_dir = "~/.local/share/promptwerk"
+
+# Personas, conventions and house rules. Empty means <repo>/knowledge.
+knowledge_dir = ""
+
+# Absolute paths of the projects runs may work in. A plan whose runs point anywhere else
+# cannot be approved. Empty list means nothing can be approved.
+projects = [
+  # "~/code/todo-app",
+]
+
+# Model for planner, runs and summary. A run may override it in the plan.
+model = "claude-opus-5-5"
+
+# Claude Code CLI binary (name on PATH or absolute path).
+claude_bin = "claude"
+
+[budgets]
+planner_usd = 8.0      # cap per planner call (draft and critic are two calls)
+summary_usd = 1.5      # cap for the plan summary
+run_cap_usd = 25.0     # hard cap per run, also after automatic raises
+raise_factor = 1.5     # a run that hits its cap is raised by this factor ...
+raise_multiple = 3.0   # ... up to this multiple of its planned budget
+daily_cap_usd = 150.0  # the worker starts nothing new once today's runs cost this much
+
+[worker]
+parallel = 2           # runs at the same time (never two in the same directory)
+usage_limit = 0.90     # no new runs above this share of the subscription usage window
+poll_seconds = 20
+
+[web]
+host = "127.0.0.1"     # keep it local; use a TLS reverse proxy for remote access
+port = 8770
+user = "promptwerk"
+# Leave empty: a random password is generated on first start, stored with mode 600 in
+# <data_dir>/web-password and printed once. Or set PROMPTWERK_PASSWORD (min. 12 chars).
+password = ""
+
+[notify]
+# Optional. One JSON POST {"text", "event", "data"} per status change worth a look.
+# https only (or http://127.0.0.1 / http://localhost).
+webhook_url = ""
+
+[finish]
+# What the worker does after all runs of a plan are finished. All off by default.
+auto_commit = false    # commit the files the runs changed, file by file
+auto_push = false
+deploy_dir = ""        # folder with <project-slug>.sh deploy scripts, run after the plan

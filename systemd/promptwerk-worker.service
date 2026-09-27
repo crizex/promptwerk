@@ -1,0 +1,22 @@
+# Copy to /etc/systemd/system/, replace YOUR_USER and /path/to/promptwerk, then:
+#   systemctl daemon-reload && systemctl enable --now promptwerk-worker
+# The user needs a logged-in Claude Code CLI (run `claude` once as that user).
+[Unit]
+Description=Promptwerk worker
+After=network.target
+
+[Service]
+Type=simple
+User=YOUR_USER
+WorkingDirectory=/path/to/promptwerk
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 /path/to/promptwerk/bin/worker.py --loop
+Restart=always
+RestartSec=10
+# Stop only the worker, not its runs. A restarted worker recognizes surviving runs by
+# their watcher pid and starts nothing next to them.
+KillMode=process
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

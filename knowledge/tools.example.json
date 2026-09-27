@@ -1,0 +1,7 @@
+{
+  "_comment": "Optional. Copy to tools.json to let the planner and the plan checker know which extra tools exist on this machine. Without tools.json the tool check is skipped.",
+  "tools": ["Read", "Grep", "Glob", "Bash", "Task", "Write", "Edit"],
+  "skills": [],
+  "plugins": [],
+  "agents": []
+}

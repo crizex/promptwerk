@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Promptwerk</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/style.css">
+<script src="/app.js" defer></script>
+</head>
+<body>
+<header class="bar">
+  <div class="brand"><span class="mark" aria-hidden="true"></span>Promptwerk</div>
+  <p class="worker" id="worker" aria-live="polite">Worker: no signal yet</p>
+  <div class="counters" id="counters"></div>
+</header>
+
+<main>
+  <section class="intro">
+    <p class="kicker">rough sentence in / reviewed run plan out</p>
+    <h1>One sentence. One <em>checked</em> plan.</h1>
+  </section>
+
+  <form class="compose" id="compose">
+    <label class="field">
+      <span>Project</span>
+      <select id="project" required></select>
+    </label>
+    <label class="field grow">
+      <span>What should happen?</span>
+      <textarea id="topic" rows="4" required minlength="8"
+        placeholder="e.g. Add due dates to todos and show overdue ones in red"></textarea>
+    </label>
+    <div class="row">
+      <label class="button ghost" for="files">Attach files</label>
+      <input type="file" id="files" multiple hidden>
+      <span class="hint" id="filelist"></span>
+      <button type="submit" class="button primary" id="generate">Generate plan</button>
+    </div>
+    <p class="hint">Ctrl+Enter also generates. Nothing runs until you approve the draft.</p>
+    <p class="error" id="composeError" role="alert"></p>
+  </form>
+
+  <section id="generations" class="stack"></section>
+
+  <div class="lanes">
+    <section class="lane">
+      <h2>Needs you <span class="count" id="nNeeds"></span></h2>
+      <div id="needs" class="stack"></div>
+    </section>
+    <section class="lane">
+      <h2>Running <span class="count" id="nRunning"></span></h2>
+      <div id="running" class="stack"></div>
+    </section>
+    <section class="lane">
+      <h2>Done <span class="count" id="nDone"></span></h2>
+      <div id="done" class="stack"></div>
+    </section>
+  </div>
+</main>
+
+<dialog id="detail" aria-labelledby="detailTitle">
+  <div class="detail-head">
+    <h2 id="detailTitle"></h2>
+    <button class="button ghost" id="closeDetail" type="button">Close</button>
+  </div>
+  <div id="detailBody"></div>
+</dialog>
+
+<footer class="foot">Promptwerk. Not affiliated with Anthropic. Claude is a trademark of Anthropic.</footer>
+</body>
+</html>

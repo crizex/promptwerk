@@ -1,0 +1,133 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["topic", "rationale", "clarifications", "runs"],
+  "properties": {
+    "topic": {
+      "type": "string",
+      "description": "The undertaking in one sentence, in the user's language."
+    },
+    "rationale": {
+      "type": "string",
+      "description": "Why exactly this split into runs. Names the line between runs and justifies every dependency."
+    },
+    "clarifications": {
+      "type": "array",
+      "description": "Everything you cannot find out yourself and without which a run would have to guess: complete, now, in one list. The operator sees these questions once, at approval, and is never asked again. Empty only if truly nothing is open.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["question", "why", "blocking"],
+        "properties": {
+          "question": {
+            "type": "string",
+            "description": "One question, one sentence, no jargon. Answerable without a terminal."
+          },
+          "why": {
+            "type": "string",
+            "description": "What would be wrong in the result if you answered it yourself."
+          },
+          "options": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "The answers to choose from, if there are any. Empty for free input (address, price, credentials)."
+          },
+          "assumption": {
+            "type": "string",
+            "description": "What the runs assume if the operator enters nothing. Required when blocking=false, empty when blocking=true."
+          },
+          "blocking": {
+            "type": "boolean",
+            "description": "true only if no reasonable assumption exists and a run would demonstrably work wrong without the answer, e.g. mandatory data only the operator knows. Otherwise false plus 'assumption'."
+          }
+        }
+      }
+    },
+    "runs": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "title", "cwd", "mode", "effort", "budget_usd", "needs",
+                     "artifacts", "acceptance", "personas", "prompt"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Short identifier, lowercase, only a-z0-9 and hyphen. Used by 'needs'."
+          },
+          "title": {"type": "string"},
+          "cwd": {
+            "type": "string",
+            "description": "Absolute path of the working directory. Must be one of the configured projects."
+          },
+          "mode": {
+            "type": "string",
+            "enum": ["read", "build", "free"],
+            "description": "read = no changes to existing files, only artifacts. build = change code, then run the check. free = everything allowed, no check."
+          },
+          "effort": {
+            "type": "string",
+            "enum": ["low", "medium", "high", "xhigh", "max"],
+            "description": "Costs money and time, not only quality, and all runs share one usage window. mode=read may go up to xhigh because that is where insight happens. mode=build gets at most high: implementing a finished finding is mechanical. max is reserved for the planner's critic and is never right in a plan."
+          },
+          "budget_usd": {
+            "type": "number",
+            "description": "Spending cap for this run. Passed as --max-budget-usd."
+          },
+          "needs": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "ids of other runs in this plan that must finish first. Empty if independent."
+          },
+          "artifacts": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Files the run must produce, relative to cwd. In mode=read these are the only allowed write targets."
+          },
+          "acceptance": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 5,
+            "items": {"type": "string"},
+            "description": "Observable sentences by which the operator can tell after the run that the promised thing exists. Each names a place and an observable fact ('On /settings every account shows its bank name'), not an intention ('labels improved'). Only what this run itself can bring about. The summary later judges against exactly this list."
+          },
+          "check": {
+            "type": ["string", "null"],
+            "description": "Shell command that must exit 0 after the run. Required for mode=build, otherwise null."
+          },
+          "post_run": {
+            "type": ["string", "null"],
+            "description": "Shell command after a green check, e.g. regenerating an index."
+          },
+          "personas": {
+            "type": "array",
+            "description": "Empty when a single perspective is enough, which is the normal case: every extra persona multiplies the cost. Useful in mode=read where two viewpoints find different defects. Almost never in mode=build.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["role", "task"],
+              "properties": {
+                "role": {"type": "string"},
+                "task": {"type": "string"}
+              }
+            }
+          },
+          "tools": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Skills, plugins or agents this run should use. Only names from tools.json, if that file exists."
+          },
+          "prompt": {
+            "type": "string",
+            "description": "The complete, final prompt for this run. Contains context, rules, personas with tasks and the artifact definition."
+          },
+          "model": {
+            "type": "string",
+            "description": "Set only if this run needs a different model than the configured default."
+          }
+        }
+      }
+    }
+  }
+}
