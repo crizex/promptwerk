@@ -9,6 +9,10 @@
 </p>
 
 <p align="center">
+  <img src="assets/demo.gif" alt="Demo: one rough sentence becomes a draft plan, the plan gets approved, and the board shows both runs finishing" width="100%">
+</p>
+
+<p align="center">
   <a href="#quick-start">Quick start</a> |
   <a href="#how-it-works">How it works</a> |
   <a href="#safety-model">Safety model</a> |

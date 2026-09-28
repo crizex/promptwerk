@@ -3,6 +3,10 @@
 All notable changes to Promptwerk. Versions follow [Semantic Versioning](https://semver.org/).
 Downloads are on the [releases page](https://github.com/crizex/promptwerk/releases).
 
+## 1.0.1
+
+- README: short demo animation from one rough sentence to a finished plan.
+
 ## 1.0.0
 
 First public release.
