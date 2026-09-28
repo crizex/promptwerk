@@ -39,14 +39,15 @@ burns through its budget, or reports success without a test ever running.
 ## How it works
 
 ```mermaid
-flowchart LR
-    A[Rough sentence] --> B[Planner<br><sub>draft + critic</sub>]
-    B --> C[Draft<br><sub>runs, budgets, checks</sub>]
-    C --> D{You approve<br><sub>or discard</sub>}
+%%{init: {"flowchart": {"padding": 20}}}%%
+flowchart TB
+    A[Rough sentence] --> B["Planner<br>draft + critic"]
+    B --> C["Draft<br>runs, budgets, checks"]
+    C --> D{"You approve<br>or discard"}
     D --> E[Queue]
-    E --> F[Worker<br><sub>parallel, budget caps</sub>]
-    F --> G[Runs<br><sub>headless Claude Code</sub>]
-    G --> H[Checked result<br><sub>check command + summary</sub>]
+    E --> F["Worker<br>parallel, budget caps"]
+    F --> G["Runs<br>headless Claude Code"]
+    G --> H["Checked result<br>check command + summary"]
 ```
 
 1. **You write one sentence** in the web UI, pick a project and optionally attach files.
