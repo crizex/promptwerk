@@ -3,6 +3,10 @@
 All notable changes to Promptwerk. Versions follow [Semantic Versioning](https://semver.org/).
 Downloads are on the [releases page](https://github.com/crizex/promptwerk/releases).
 
+## 1.2.0
+
+- The project picker remembers your last choice in this browser.
+
 ## 1.1.0
 
 - Image artifacts and attachments (PNG, JPEG, GIF, WebP) open in the browser instead of

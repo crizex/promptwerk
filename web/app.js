@@ -107,6 +107,11 @@ function render() {
     sel.replaceChildren(...(s.projects.length ? s.projects.map((p) => h("option", { value: p, title: p }, p.split("/").filter(Boolean).pop()))
       : [h("option", { value: "" }, "No projects configured: add them to config.toml")]));
     sel.dataset.filled = "1";
+    try {  // last choice survives a reload; storage may be blocked, then the first project wins
+      const last = localStorage.getItem("promptwerk.project");
+      if (s.projects.includes(last)) sel.value = last;
+    } catch {}
+    sel.addEventListener("change", () => { try { localStorage.setItem("promptwerk.project", sel.value); } catch {} });
   }
 
   $("generations").replaceChildren(...s.generations.map(genCard));
