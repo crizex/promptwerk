@@ -69,9 +69,22 @@ def ensure_dirs():
 
 
 def slug(path):
-    """Stable short name for a project dir: lock names, deploy scripts, profiles."""
-    return re.sub(r"-+$", "", re.sub(r"[^a-z0-9]+", "-", os.path.basename(
-        os.path.normpath(path)).lower()))
+    """Stable short name for a project dir: lock names, deploy scripts, profiles.
+
+    The folder name alone, unless another configured project ends the same way
+    (/work/a/backend and /work/b/backend): then parent folders are added until the
+    name is unique, so the two never share a lock, a deploy script or a profile.
+    """
+    def tail(p, n):
+        parts = os.path.normpath(p).strip(os.sep).split(os.sep)
+        return re.sub(r"-+$", "", re.sub(r"[^a-z0-9]+", "-", "-".join(parts[-n:]).lower())).strip("-")
+    me = os.path.normpath(os.path.abspath(path))
+    others = [p for p in C["projects"] if os.path.normpath(p) != me]
+    depth = len(me.strip(os.sep).split(os.sep))
+    n = 1
+    while n < depth and any(tail(o, n) == tail(me, n) for o in others):
+        n += 1
+    return tail(me, n)
 
 
 def house_rules():

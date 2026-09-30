@@ -67,6 +67,17 @@ class Checks(unittest.TestCase):
         config.ensure_dirs()
         self.assertEqual(stat.S_IMODE(os.stat(DATA).st_mode), 0o700)
 
+    def test_slug_unique_for_same_folder_name(self):
+        self.assertEqual(config.slug(PROJECT), "todo-app")
+        saved = config.C["projects"]
+        try:
+            config.C["projects"] = ["/work/a/backend", "/work/b/backend", "/work/web"]
+            self.assertEqual(config.slug("/work/a/backend"), "a-backend")
+            self.assertEqual(config.slug("/work/b/backend"), "b-backend")
+            self.assertEqual(config.slug("/work/web"), "web")
+        finally:
+            config.C["projects"] = saved
+
     def test_example_plan_is_clean(self):
         self.assertEqual(check_plan.check(example_plan()), [])
 

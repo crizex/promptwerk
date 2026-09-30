@@ -3,6 +3,12 @@
 All notable changes to Promptwerk. Versions follow [Semantic Versioning](https://semver.org/).
 Downloads are on the [releases page](https://github.com/crizex/promptwerk/releases).
 
+## 1.0.3
+
+- Two projects with the same folder name (for example `/work/a/backend` and `/work/b/backend`) no
+  longer share a lock, a deploy script or a project profile. Their names now include the parent
+  folder (`a-backend.sh`, `b-backend.sh`). Projects with unique folder names keep their names.
+
 ## 1.0.2
 
 - README: the diagram is readable on GitHub again, labels no longer get cut off inside their boxes.
