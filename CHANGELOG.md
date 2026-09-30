@@ -3,6 +3,38 @@
 All notable changes to Promptwerk. Versions follow [Semantic Versioning](https://semver.org/).
 Downloads are on the [releases page](https://github.com/crizex/promptwerk/releases).
 
+## 1.3.0
+
+A larger update for everyday use.
+
+**Writing a task**
+- Attach files by pasting (screenshots straight from the clipboard) or by dropping them on the
+  form. Attached files show as a list with size and a remove button.
+- More attachment types: source code, `.tsv`, `.rtf`, `.toml`, `.ini`, diffs and patches. Old
+  Office formats (`.doc`, `.xls`, `.ppt`) are accepted with a note that asks for the modern format.
+- Two files with the same name (every pasted screenshot is `image.png`) no longer overwrite each
+  other: the second becomes `image-2.png`. If storing fails, no half-written folder is left.
+- Picking a project without a deploy script shows a short hint, when deploys are configured.
+
+**Reviewing a draft**
+- Every run shows its full prompt and working directory before you approve.
+- Clarifying questions have a multi-line answer field, and the planner's suggestions are buttons
+  that fill it in.
+- Your attachments appear in the draft as a small gallery.
+
+**Plans and runs**
+- Artifacts open inside the UI: Markdown is rendered, a JSON list of findings becomes a table
+  sorted by severity, other text is shown as is, with size and line count. Links in Markdown
+  only open for `http`/`https`.
+- An approved plan that has not started yet can be withdrawn from the queue.
+- A plan can no longer be closed while one of its runs is still working.
+- Typing an answer or a budget no longer gets wiped by a live update.
+
+**Overview**
+- The top bar shows the last 7 days: plans approved, goal met out of those judged, cost.
+- An open tab notices when the UI was updated and offers a reload button.
+- The webhook also reports when a draft is ready for review or planning failed.
+
 ## 1.2.0
 
 - The project picker remembers your last choice in this browser.

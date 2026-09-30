@@ -14,6 +14,7 @@
   <div class="brand"><span class="mark" aria-hidden="true"></span>Promptwerk</div>
   <p class="worker" id="worker" aria-live="polite">Worker: no signal yet</p>
   <div class="counters" id="counters"></div>
+  <button class="button primary small" id="reload" type="button" hidden>New version: reload</button>
 </header>
 
 <main>
@@ -26,6 +27,7 @@
     <label class="field">
       <span>Project</span>
       <select id="project" required></select>
+      <small class="hint" id="deployHint" aria-live="polite"></small>
     </label>
     <label class="field grow">
       <span>What should happen?</span>
@@ -35,10 +37,10 @@
     <div class="row">
       <label class="button ghost" for="files">Attach files</label>
       <input type="file" id="files" multiple hidden>
-      <span class="hint" id="filelist"></span>
+      <ul class="files" id="filelist" aria-label="Attached files"></ul>
       <button type="submit" class="button primary" id="generate">Generate plan</button>
     </div>
-    <p class="hint">Ctrl+Enter also generates. Nothing runs until you approve the draft.</p>
+    <p class="hint">Paste screenshots or drop files here. Ctrl+Enter also generates. Nothing runs until you approve the draft.</p>
     <p class="error" id="composeError" role="alert"></p>
   </form>
 

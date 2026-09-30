@@ -5,6 +5,8 @@
 const $ = (id) => document.getElementById(id);
 let S = null;          // last state
 let open = null;       // what the detail dialog shows: {kind, name|rid}
+let UI = null;         // UI version this tab was loaded with
+let picked = [];       // files chosen, pasted or dropped for the next plan
 
 function h(tag, attrs, ...kids) {
   const el = document.createElement(tag);
@@ -99,8 +101,13 @@ function render() {
   const w = s.worker || {};
   const age = w.time ? Math.round(Date.now() / 1000 - w.time) : null;
   $("worker").textContent = w.text ? `Worker: ${w.text}` + (age > 120 ? ` (${Math.round(age / 60)} min ago)` : "") : "Worker: no signal yet. Is promptwerk-worker running?";
+  const wk = s.week || {};
   $("counters").replaceChildren(
-    h("span", {}, h("b", {}, usd(s.today_usd)), ` of ${usd(s.daily_cap_usd)} today`));
+    h("span", {}, h("b", {}, usd(s.today_usd)), ` of ${usd(s.daily_cap_usd)} today`),
+    h("span", { title: "Plans approved in the last 7 days, goal met of those with a summary, cost of all runs" },
+      "7 days: ", h("b", {}, wk.plans || 0), wk.plans === 1 ? " plan, goal met " : " plans, goal met ", h("b", {}, `${wk.goal_met || 0}/${wk.judged || 0}`), ", ", h("b", {}, usd(wk.cost_usd))));
+  UI = UI || s.ui;
+  $("reload").hidden = !s.ui || s.ui === UI;
 
   const sel = $("project");
   if (sel.dataset.filled !== "1") {
@@ -112,7 +119,9 @@ function render() {
       if (s.projects.includes(last)) sel.value = last;
     } catch {}
     sel.addEventListener("change", () => { try { localStorage.setItem("promptwerk.project", sel.value); } catch {} });
+    sel.addEventListener("change", deployHint);
   }
+  deployHint();
 
   $("generations").replaceChildren(...s.generations.map(genCard));
   const lanes = { needs: s.drafts.map(draftCard), running: [], done: [] };
@@ -125,6 +134,11 @@ function render() {
   $("nRunning").textContent = lanes.running.length;
   $("nDone").textContent = lanes.done.length;
   if (open && $("detail").open && open.kind !== "run") renderDetail();
+}
+
+function deployHint() {
+  const miss = S && S.without_deploy.includes($("project").value);
+  $("deployHint").textContent = miss ? "No deploy script for this project: runs finish without a deploy." : "";
 }
 
 async function refresh() {
@@ -155,7 +169,20 @@ function runBlock(r) {
         + (r.needs && r.needs.length ? `, after ${r.needs.join(", ")}` : ""))),
     r.personas && r.personas.length ? h("p", { class: "meta" }, "Personas: " + r.personas.map((p) => p.role).join(", ")) : null,
     list(r.acceptance),
-    r.check ? h("p", { class: "meta" }, "Check: ", h("code", {}, r.check)) : null);
+    r.check ? h("p", { class: "meta" }, "Check: ", h("code", {}, r.check)) : null,
+    r.cwd ? h("p", { class: "meta" }, "Works in: ", h("code", {}, r.cwd)) : null,
+    r.prompt ? h("details", {}, h("summary", {}, "Full prompt"), h("pre", {}, r.prompt)) : null);
+}
+
+const IMG = /\.(png|jpe?g|gif|webp)$/i;
+
+function gallery(paths) {  // "<generation id>/<name>" as stored by the planner
+  return h("section", {}, h("h3", {}, "Your attachments"), h("div", { class: "gallery" }, paths.map((p) => {
+    const [gid, name] = p.split("/");
+    const href = `/api/attachment/${encodeURIComponent(gid)}/${encodeURIComponent(name)}`;
+    return h("a", { href, target: "_blank", rel: "noopener", class: "thumb", title: name },
+      IMG.test(name) ? h("img", { src: href, alt: name, loading: "lazy" }) : h("span", { class: "file" }, name.split(".").pop()), h("small", {}, name));
+  })));
 }
 
 function renderDraft(d) {
@@ -168,11 +195,13 @@ function renderDraft(d) {
   } } }, "Approve and queue");
   return [
     h("p", { class: "lead" }, d.rationale || ""),
-    d.clarifications.length ? h("section", {}, h("h3", {}, "Questions"), d.clarifications.map((c, i) => h("label", { class: "field" },
-      h("span", {}, (c.blocking ? "Blocking: " : "") + c.question),
-      h("small", { class: "meta" }, c.why || ""),
-      answers[i] = h("input", { type: "text", placeholder: c.blocking ? "Answer required" : "Default: " + (c.assumption || ""), list: "opt" + i }),
-      h("datalist", { id: "opt" + i }, (c.options || []).map((o) => h("option", { value: o })))))) : null,
+    d.clarifications.length ? h("section", {}, h("h3", {}, "Questions"), d.clarifications.map((c, i) => h("div", { class: "field" },
+      h("label", { for: "ans" + i }, (c.blocking ? "Blocking: " : "") + c.question),
+      c.why ? h("small", { class: "meta" }, c.why) : null,
+      answers[i] = h("textarea", { id: "ans" + i, rows: 2, placeholder: c.blocking ? "Answer required" : "Default: " + (c.assumption || "") }),
+      c.options && c.options.length ? h("div", { class: "row options" }, c.options.map((o) => h("button", { class: "button ghost small", type: "button",
+        on: { click: () => { answers[i].value = o; answers[i].focus(); } } }, o))) : null))) : null,
+    d.attachments.length ? gallery(d.attachments) : null,
     d.findings.length ? h("section", {}, h("h3", {}, "Open findings"), list(d.findings, (f) => `[${f.kind}] ${f.run}: ${f.problem}`)) : null,
     h("section", {}, h("h3", {}, "Runs"), d.runs.map(runBlock)),
     h("label", { class: "field" }, h("span", {}, "Extra constraints for every run"), cons),
@@ -223,6 +252,8 @@ function planRun(p, r) {
 
 function renderPlan(p) {
   const done = p.runs.every((r) => FINISHED.has(r.status));
+  const live = p.runs.some((r) => LIVE.has(r.status));
+  const untouched = !p.closed && p.runs.every((r) => !r.run_id);
   return [
     p.goal ? h("blockquote", {}, p.goal) : null,
     summaryBlock(p.summary),
@@ -230,7 +261,11 @@ function renderPlan(p) {
     p.finish && p.finish.length ? h("section", {}, h("h3", {}, "Finish line"), list(p.finish, (s) => `${s.ok ? "ok" : "failed"}: ${s.command} ${s.output ? "(" + s.output.slice(0, 160) + ")" : ""}`)) : null,
     h("div", { class: "row" },
       done ? h("button", { class: "button", type: "button", disabled: p.summarizing, on: { click: (e) => act("summary", { plan: p.name }, e.target) } }, p.summarizing ? "Writing summary" : p.summary ? "Rewrite summary" : "Write summary") : null,
-      h("button", { class: "button ghost", type: "button", on: { click: (e) => act(p.closed ? "reopen" : "close", { plan: p.name }, e.target) } }, p.closed ? "Reopen plan" : "Close plan")),
+      untouched ? h("button", { class: "button danger", type: "button", on: { click: async (e) => {
+        if (confirm("Take this plan out of the queue? Nothing has run yet.") && await act("withdraw", { plan: p.name }, e.target)) $("detail").close();
+      } } }, "Withdraw plan") : null,
+      h("button", { class: "button ghost", type: "button", disabled: live && !p.closed, title: live && !p.closed ? "A run is still working. Cancel it first." : null,
+        on: { click: (e) => act(p.closed ? "reopen" : "close", { plan: p.name }, e.target) } }, p.closed ? "Reopen plan" : "Close plan")),
   ];
 }
 
@@ -240,6 +275,10 @@ function renderDetail() {
   if (!item) { $("detail").close(); return; }
   // keep typed input: only re-render plans, whose inputs are rarely mid-edit
   if (open.kind === "draft" && $("detailBody").dataset.for === open.name) return;
+  // plans: never rebuild under the user's fingers (an answer half typed on a phone)
+  const body = $("detailBody");
+  if (body.dataset.for === open.name && body.contains(document.activeElement)
+    && /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName)) return;
   $("detailTitle").textContent = item.topic || item.name;
   $("detailBody").dataset.for = open.name;
   $("detailBody").replaceChildren(...(open.kind === "draft" ? renderDraft(item) : renderPlan(item)).filter(Boolean));
@@ -258,12 +297,105 @@ async function showRun(rid) {
     d.artifacts.length ? h("section", {}, h("h3", {}, "Artifacts"), list(d.artifacts, (a) => {
       const href = `/api/artifact/${encodeURIComponent(rid)}/${encodeURIComponent(a)}`;
       const link = h("a", { href, target: "_blank", rel: "noopener" }, a);
-      return /\.(png|jpe?g|gif|webp)$/i.test(a) ? [link, h("img", { class: "shot", src: href, alt: a, loading: "lazy" })] : link;
+      if (IMG.test(a)) return [link, h("img", { class: "shot", src: href, alt: a, loading: "lazy" })];
+      return TEXT.test(a) ? [link, " ", h("button", { class: "button ghost small", type: "button", on: { click: () => showArtifact(rid, a, m.title) } }, "View")] : link;
     })) : null,
     h("section", {}, h("h3", {}, "Log"), h("pre", { class: "log" }, d.log.join("\n") || "No output yet.")),
     h("details", {}, h("summary", {}, "Prompt"), h("pre", {}, d.prompt)),
     h("button", { class: "button ghost", type: "button", on: { click: () => show({ kind: "plan", name: m.plan }) } }, "Back to plan"));
   if (!$("detail").open) $("detail").showModal();
+}
+
+// ------------------------------------------------------------------ artifacts
+
+const TEXT = /\.(md|markdown|txt|log|json|csv|tsv|ya?ml|diff|patch)$/i;
+const RANK = { critical: 0, blocker: 0, high: 1, major: 1, medium: 2, moderate: 2, low: 3, minor: 3, info: 4 };
+
+// Markdown to DOM nodes. No innerHTML: artifacts are written by a model and read here.
+function inline(t) {
+  return t.split(/(`[^`]+`|\*\*[^*]+\*\*|\[[^\]]+\]\([^)\s]+\))/).map((p) => {
+    let m;
+    if ((m = p.match(/^`([^`]+)`$/))) return h("code", {}, m[1]);
+    if ((m = p.match(/^\*\*([^*]+)\*\*$/))) return h("strong", {}, m[1]);
+    if ((m = p.match(/^\[([^\]]+)\]\(([^)\s]+)\)$/)))
+      return /^https?:\/\//i.test(m[2]) ? h("a", { href: m[2], target: "_blank", rel: "noopener noreferrer" }, m[1]) : `${m[1]} (${m[2]})`;
+    return p;
+  });
+}
+
+function markdown(text) {
+  const out = [];
+  let box = null, fence = null;
+  const flush = () => { box = null; };
+  for (const line of text.split("\n")) {
+    let m;
+    if (fence !== null) {
+      if (/^```/.test(line)) { out.push(h("pre", {}, fence.join("\n"))); fence = null; } else fence.push(line);
+      continue;
+    }
+    if (/^```/.test(line)) { flush(); fence = []; continue; }
+    if (!line.trim()) { flush(); continue; }
+    if ((m = line.match(/^(#{1,6})\s+(.*)$/))) { flush(); out.push(h("h" + Math.min(m[1].length + 2, 6), {}, inline(m[2]))); continue; }
+    if (/^\s*---+\s*$/.test(line)) { flush(); out.push(h("hr", {})); continue; }
+    if (/^\s*\|.*\|\s*$/.test(line)) {
+      if (/^[\s|:-]+$/.test(line)) continue;
+      const cells = line.trim().slice(1, -1).split("|").map((c) => c.trim());
+      if (!box || box.tagName !== "TBODY") {
+        const body = h("tbody", {});
+        out.push(h("div", { class: "table" }, h("table", {}, h("thead", {}, h("tr", {}, cells.map((c) => h("th", {}, inline(c))))), body)));
+        box = body;
+      } else box.append(h("tr", {}, cells.map((c) => h("td", {}, inline(c)))));
+      continue;
+    }
+    const tag = (m = line.match(/^\s*[-*]\s+(.*)$/)) ? "UL" : (m = line.match(/^\s*\d+\.\s+(.*)$/)) ? "OL" : null;
+    if (tag) {
+      if (!box || box.tagName !== tag) { box = h(tag.toLowerCase(), {}); out.push(box); }
+      box.append(h("li", {}, inline(m[1])));
+      continue;
+    }
+    if ((m = line.match(/^\s*>\s?(.*)$/))) {
+      if (!box || box.tagName !== "BLOCKQUOTE") { box = h("blockquote", {}); out.push(box); }
+      box.append(h("p", {}, inline(m[1])));
+      continue;
+    }
+    flush();
+    out.push(h("p", {}, inline(line)));
+  }
+  if (fence !== null) out.push(h("pre", {}, fence.join("\n")));
+  return h("div", { class: "prose" }, out);
+}
+
+// A JSON list of findings becomes a table, most severe first. Anything else stays JSON.
+function jsonView(text) {
+  let data;
+  try { data = JSON.parse(text); } catch { return h("pre", {}, text); }
+  const rows = Array.isArray(data) ? data : Array.isArray(data && data.findings) ? data.findings : null;
+  const sev = rows && rows.length && rows.every((r) => r && typeof r === "object" && !Array.isArray(r))
+    && ["severity", "level", "priority"].find((k) => rows.some((r) => k in r));
+  if (!sev) return h("pre", {}, JSON.stringify(data, null, 2));
+  const rank = (r) => RANK[String(r[sev]).toLowerCase()] ?? 9;
+  const cols = [sev, ...[...new Set(rows.flatMap(Object.keys))].filter((k) => k !== sev)].slice(0, 6);
+  const cell = (v) => v == null ? "" : typeof v === "object" ? JSON.stringify(v) : String(v);
+  return h("div", { class: "table" }, h("table", {},
+    h("thead", {}, h("tr", {}, cols.map((c) => h("th", {}, c)))),
+    h("tbody", {}, [...rows].sort((a, b) => rank(a) - rank(b)).map((r) => h("tr", {}, cols.map((c, i) =>
+      h("td", {}, i === 0 ? h("span", { class: "badge sev-" + rank(r) }, cell(r[c])) : cell(r[c]))))))));
+}
+
+async function showArtifact(rid, name, title) {
+  const href = `/api/artifact/${encodeURIComponent(rid)}/${encodeURIComponent(name)}`;
+  const r = await fetch(href);
+  if (!r.ok) return alert("Could not load " + name);
+  const text = await r.text();
+  const size = new Blob([text]).size;
+  open = { kind: "run", rid };
+  $("detailTitle").textContent = name;
+  $("detailBody").dataset.for = "";
+  $("detailBody").replaceChildren(
+    h("p", { class: "meta" }, `${title}, ${size < 1024 ? size + " B" : (size / 1024).toFixed(1) + " KB"}, ${text.split("\n").length} lines, `,
+      h("a", { href, target: "_blank", rel: "noopener" }, "raw")),
+    /\.(md|markdown)$/i.test(name) ? markdown(text) : /\.json$/i.test(name) ? jsonView(text) : h("pre", {}, text),
+    h("button", { class: "button ghost", type: "button", on: { click: () => showRun(rid) } }, "Back to run"));
 }
 
 // ------------------------------------------------------------------ compose
@@ -283,11 +415,11 @@ async function generate(e) {
   const btn = $("generate");
   btn.disabled = true;
   try {
-    const attachments = await Promise.all([...$("files").files].map(readFile));
+    const attachments = await Promise.all(picked.map(readFile));
     await api("/api/generate", { topic: $("topic").value, project: $("project").value, attachments });
     $("topic").value = "";
-    $("files").value = "";
-    $("filelist").textContent = "";
+    picked = [];
+    drawFiles();
     await refresh();
   } catch (err) {
     $("composeError").textContent = err.message;
@@ -296,14 +428,35 @@ async function generate(e) {
   }
 }
 
+function kb(n) {
+  return n < 1024 * 1024 ? Math.max(1, Math.round(n / 1024)) + " KB" : (n / 1048576).toFixed(1) + " MB";
+}
+
+function drawFiles() {
+  $("filelist").replaceChildren(...picked.map((f, i) => h("li", {}, h("span", {}, f.name), h("small", { class: "meta" }, kb(f.size)),
+    h("button", { class: "x", type: "button", "aria-label": "Remove " + f.name, on: { click: () => { picked.splice(i, 1); drawFiles(); } } }, "×"))));
+}
+
+function addFiles(files) {
+  for (const f of files) {
+    // pasted screenshots all arrive as "image.png"; the server numbers duplicates
+    if (!picked.some((p) => p.name === f.name && p.size === f.size && p.lastModified === f.lastModified)) picked.push(f);
+  }
+  drawFiles();
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   $("compose").addEventListener("submit", generate);
   $("topic").addEventListener("keydown", (e) => {
     if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) $("compose").requestSubmit();
   });
-  $("files").addEventListener("change", () => {
-    $("filelist").textContent = [...$("files").files].map((f) => f.name).join(", ");
-  });
+  $("files").addEventListener("change", () => { addFiles($("files").files); $("files").value = ""; });
+  $("topic").addEventListener("paste", (e) => { if (e.clipboardData.files.length) { e.preventDefault(); addFiles(e.clipboardData.files); } });
+  const form = $("compose");
+  form.addEventListener("dragover", (e) => { if (e.dataTransfer.types.includes("Files")) { e.preventDefault(); form.classList.add("drop"); } });
+  form.addEventListener("dragleave", (e) => { if (!form.contains(e.relatedTarget)) form.classList.remove("drop"); });
+  form.addEventListener("drop", (e) => { e.preventDefault(); form.classList.remove("drop"); addFiles(e.dataTransfer.files); });
+  $("reload").addEventListener("click", () => location.reload());
   $("closeDetail").addEventListener("click", () => $("detail").close());
   $("detail").addEventListener("close", () => { open = null; $("detailBody").dataset.for = ""; });
   refresh();

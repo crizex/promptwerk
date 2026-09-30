@@ -50,12 +50,14 @@ flowchart TB
     G --> H["Checked result<br>check command + summary"]
 ```
 
-1. **You write one sentence** in the web UI, pick a project and optionally attach files.
+1. **You write one sentence** in the web UI, pick a project and optionally attach files
+   (pick, paste a screenshot or drop them on the form).
 2. **The planner** (two Claude calls: a draft and a critic) turns it into a plan: one or more
    runs, each with a mode (`read` or `build`), effort, budget, artifacts, acceptance criteria,
    an optional shell check and dependencies on other runs. Open questions come back as
    clarifications, with the assumption the planner would make.
-3. **You review the draft.** Answer the questions, add constraints, look at every run prompt.
+3. **You review the draft.** Answer the questions (or tap one of the planner's suggestions), add
+   constraints, read the full prompt and working directory of every run, see your attachments.
    `check_plan.py` flags cycles, unknown projects and scope problems; fatal findings disable
    the approve button.
 4. **The worker** picks up approved plans, starts runs whose dependencies are done, never two in
@@ -64,7 +66,8 @@ flowchart TB
    artifacts, build runs cannot commit, push or do irreversible deletes. A run that needs a decision
    pauses and asks you in the UI.
 6. **After a run** its check command runs. After the plan, a short summary states whether the
-   goal was met, what to try, what is missing and a suggested follow-up.
+   goal was met, what to try, what is missing and a suggested follow-up. Artifacts open right in
+   the UI: Markdown rendered, JSON finding lists as a table sorted by severity, images inline.
 
 ## Screenshots
 
@@ -165,9 +168,9 @@ to see a run that asks you something, `FAKE_SLOW` for one that keeps running.
 python3 -m unittest discover tests
 ```
 
-17 tests: plan checks, constraints, both hooks, the full flow planner to summary with the fake
+24 tests: plan checks, constraints, both hooks, the full flow planner to summary with the fake
 binary, questions and budget raises, and the web server (auth, headers, validation, approval
-rules, path traversal).
+rules, attachments, withdraw and close rules, path traversal).
 
 ## Safety model
 
@@ -210,7 +213,7 @@ key has a default except `projects`.
 | `worker.usage_limit` | `0.90` | No new runs above this share of the usage window |
 | `web.host` / `web.port` | `127.0.0.1` / `8770` | Where the UI listens |
 | `web.user` / `web.password` | `promptwerk` / generated | Basic auth |
-| `notify.webhook_url` | empty | Optional JSON POST per status change |
+| `notify.webhook_url` | empty | Optional JSON POST per status change and when a draft is ready or planning failed |
 | `finish.auto_commit` / `auto_push` / `deploy_dir` | off | What happens after a finished plan |
 
 Environment overrides: `PROMPTWERK_CONFIG`, `PROMPTWERK_DATA_DIR`, `PROMPTWERK_CLAUDE_BIN`,

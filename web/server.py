@@ -17,6 +17,7 @@ import json
 import os
 import re
 import secrets
+import shutil
 import signal
 import subprocess
 import sys
@@ -32,6 +33,7 @@ import attachment_text  # noqa: E402
 import check_plan  # noqa: E402
 import config  # noqa: E402
 import constraints  # noqa: E402
+import notify  # noqa: E402
 
 C = config.C
 DRAFTS, QUEUE, RUNS, LOGS, ATTACH = (config.DRAFTS, config.QUEUE, config.RUNS,
@@ -40,7 +42,12 @@ MAX_BODY = 32 * 1024 * 1024
 MAX_FILES, MAX_FILES_BYTES = 10, 20 * 1024 * 1024
 ATTACH_EXT = {".txt", ".md", ".json", ".csv", ".log", ".yaml", ".yml", ".xml", ".html",
               ".pdf", ".png", ".jpg", ".jpeg", ".gif", ".webp",
-              ".xlsx", ".xlsm", ".docx", ".pptx", ".odt", ".ods", ".odp"}
+              ".xlsx", ".xlsm", ".docx", ".pptx", ".odt", ".ods", ".odp",
+              ".tsv", ".rtf", ".ini", ".toml", ".diff", ".patch",
+              ".py", ".js", ".mjs", ".ts", ".tsx", ".jsx", ".css", ".scss", ".sh", ".sql",
+              ".go", ".rs", ".java", ".kt", ".swift", ".c", ".h", ".cpp", ".cs", ".php", ".rb",
+              ".xls", ".doc", ".ppt"}  # old binary formats get a note instead of text
+LIVE = {"running", "checking", "waiting_for_answer"}
 RESUMABLE = {"failed", "check_failed", "ratelimit", "budget_exhausted", "incomplete"}
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,120}$")
 STATIC = {"/": "index.html", "/app.js": "app.js", "/style.css": "style.css",
@@ -146,9 +153,10 @@ def draft_card(name):
     return {"name": name, "topic": d.get("topic"), "rationale": d.get("rationale"),
             "project": pw.get("project", ""), "findings": pw.get("open_findings") or [],
             "clarifications": d.get("clarifications") or [],
+            "attachments": pw.get("attachments") or [],
             "runs": [{k: r.get(k) for k in ("id", "title", "mode", "effort", "budget_usd",
                                              "needs", "personas", "acceptance", "check", "cwd",
-                                             "artifacts")} for r in d.get("runs") or []]}
+                                             "artifacts", "prompt")} for r in d.get("runs") or []]}
 
 
 def plan_card(name, metas):
@@ -170,14 +178,51 @@ def plan_card(name, metas):
     return {"name": name, "topic": plan.get("topic"), "rationale": plan.get("rationale"),
             "goal": (plan.get("_promptwerk") or {}).get("topic_raw", ""), "runs": runs,
             "summary": side(".summary.json"), "finish": side(".finish.json"),
+            "approved": (plan.get("_promptwerk") or {}).get("approved"),
             "closed": os.path.exists(path.replace(".json", ".closed.json")),
             "summarizing": name in SUMMARIES}
+
+
+def ui_version():
+    """Hash of the shipped UI files. An open tab compares it with the one it loaded with and
+    offers a reload after an update, instead of running old JavaScript against a new server."""
+    h = hashlib.sha256()
+    for name in sorted(set(STATIC.values())):
+        try:
+            with open(os.path.join(HERE, name), "rb") as f:
+                h.update(f.read())
+        except OSError:
+            pass
+    return h.hexdigest()[:12]
+
+
+def week(metas, plans):
+    """Last 7 days at a glance: plans approved, how many met their goal, what they cost."""
+    since = time.time() - 7 * 86400
+    day = time.strftime("%Y-%m-%d", time.localtime(since))
+    recent = [p for p in plans if (p["approved"] or 0) >= since]
+    judged = [p for p in recent if (p["summary"] or {}).get("goal_met")]
+    return {"plans": len(recent),
+            "goal_met": sum(1 for p in judged if p["summary"]["goal_met"].get("state") == "yes"),
+            "judged": len(judged),
+            "cost_usd": round(sum(float(m.get("cost_usd") or 0) for m in metas
+                                  if str(m.get("started") or "") >= day), 2)}
+
+
+def without_deploy():
+    """Projects that have no deploy script, if deploys are on at all. Shown when picking one."""
+    folder = C["finish"]["deploy_dir"]
+    if not folder:
+        return []
+    folder = os.path.expanduser(folder)
+    return [p for p in C["projects"] if not os.path.isfile(os.path.join(folder, config.slug(p) + ".sh"))]
 
 
 def state():
     metas = all_metas()
     plans = [plan_card(n, metas) for n in listing(QUEUE) if n.count(".") == 1]
     return {"worker": config.read_json(os.path.join(LOGS, "worker.json")) or {},
+            "ui": ui_version(), "week": week(metas, plans), "without_deploy": without_deploy(),
             "projects": C["projects"], "generations": generations(),
             "drafts": [draft_card(n) for n in listing(DRAFTS)], "plans": plans,
             "today_usd": round(sum(float(m.get("cost_usd") or 0) for m in metas
@@ -248,12 +293,24 @@ def safe_name(name):
     return name
 
 
-def spawn(args, log=None):
+def spawn(args, log=None, reap=True):
     out = open(log, "a", encoding="utf-8") if log else subprocess.DEVNULL
     p = subprocess.Popen([sys.executable, *args], stdout=out, stderr=subprocess.STDOUT,
                          stdin=subprocess.DEVNULL, start_new_session=True)
-    threading.Thread(target=p.wait, daemon=True).start()  # reap, no zombies
+    if reap:
+        threading.Thread(target=p.wait, daemon=True).start()  # reap, no zombies
     return p
+
+
+def planner_done(p, gid, topic):
+    """Wait for the planner and send a note: draft ready to review, or planning failed."""
+    p.wait()
+    short = topic.strip().splitlines()[0][:80] if topic.strip() else gid
+    if os.path.exists(os.path.join(DRAFTS, gid + ".json")):
+        notify.send(f"Promptwerk: draft ready for review: '{short}'.", "draft_ready", {"id": gid})
+    else:
+        notify.send(f"Promptwerk: planning failed for '{short}' (exit {p.returncode}).",
+                    "draft_failed", {"id": gid})
 
 
 def start_planner(gid, topic, project, files):
@@ -265,7 +322,8 @@ def start_planner(gid, topic, project, files):
     args += ["--", topic]  # a topic starting with "-" must not be read as an option
     log = os.path.join(LOGS, f"gen-{gid}.log")
     open(log, "w").close()
-    p = spawn(args, log)
+    p = spawn(args, log, reap=False)
+    threading.Thread(target=planner_done, args=(p, gid, topic), daemon=True).start()
     config.write_json(os.path.join(LOGS, f"gen-{gid}.json"),
                       {"id": gid, "topic": topic, "project": project, "files": files,
                        "pid": p.pid, "started": time.time()})
@@ -284,11 +342,17 @@ def do_generate(body):
     import planner
     gid = planner.new_id()
     decoded = []
+    taken = set()
     for a in files:
         name = re.sub(r"[^A-Za-z0-9._-]+", "_", os.path.basename(str(a.get("name") or "")))[:100]
-        ext = os.path.splitext(name)[1].lower()
-        if not name or ext not in ATTACH_EXT:
+        name = name.lstrip(".")  # no hidden files, and NAME_RE needs a letter or digit first
+        stem, ext = os.path.splitext(name)
+        if not name or ext.lower() not in ATTACH_EXT:
             raise Refused(400, f"Attachment type not allowed: {name or '?'}")
+        n = 2
+        while name.lower() in taken:  # two screenshots called image.png must not overwrite
+            name, n = f"{stem}-{n}{ext}", n + 1
+        taken.add(name.lower())
         try:
             decoded.append((name, base64.b64decode(str(a.get("data") or ""), validate=True)))
         except ValueError:
@@ -299,15 +363,19 @@ def do_generate(body):
     if decoded:
         folder = os.path.join(ATTACH, gid)
         os.makedirs(folder, mode=0o700)
-        for name, data in decoded:
-            p = os.path.join(folder, name)
-            with open(p, "wb") as f:
-                f.write(data)
-            paths.append(p)
-            t = attachment_text.text(p)
-            if t is not None:
-                with open(p + ".txt", "w", encoding="utf-8") as f:
-                    f.write(t)
+        try:
+            for name, data in decoded:
+                p = os.path.join(folder, name)
+                with open(p, "wb") as f:
+                    f.write(data)
+                paths.append(p)
+                t = attachment_text.text(p)
+                if t is not None:
+                    with open(p + ".txt", "w", encoding="utf-8") as f:
+                        f.write(t)
+        except OSError as e:  # disk full or similar: no half-written folder left behind
+            shutil.rmtree(folder, ignore_errors=True)
+            raise Refused(500, f"Could not store the attachments: {e.strerror or e}")
     start_planner(gid, topic, project, paths)
     return {"id": gid}
 
@@ -430,13 +498,31 @@ def plan_path(body):
     return name, path
 
 
+def plan_metas(name):
+    return [m for m in all_metas() if m.get("plan") == name]
+
+
 def do_close(body, close=True):
-    _, path = plan_path(body)
+    name, path = plan_path(body)
     mark = path.replace(".json", ".closed.json")
+    live = [m["key"] for m in plan_metas(name) if m.get("status") in LIVE]
+    if close and live:
+        raise Refused(409, f"Still working: {', '.join(sorted(live))}. Cancel it first or wait.")
     if close:
         config.write_json(mark, {"closed": time.time()})
     elif os.path.exists(mark):
         os.unlink(mark)
+    return {"ok": True}
+
+
+def do_withdraw(body):
+    """Take an approved plan out of the queue before any of its runs has started."""
+    name, path = plan_path(body)
+    if plan_metas(name):
+        raise Refused(409, "A run of this plan has already started. Close the plan instead.")
+    # ponytail: the worker may start a run between this check and the unlink; that run then
+    # finishes as an orphan. A queue lock would close the gap if it ever matters.
+    os.unlink(path)
     return {"ok": True}
 
 
@@ -491,7 +577,7 @@ def do_gen_dismiss(body):
 
 ACTIONS = {"generate": do_generate, "approve": do_approve, "discard": do_discard,
            "cancel": do_cancel, "resume": do_resume, "answer": do_answer, "budget": do_budget,
-           "close": do_close, "reopen": lambda b: do_close(b, False), "summary": do_summary,
+           "withdraw": do_withdraw, "close": do_close, "reopen": lambda b: do_close(b, False), "summary": do_summary,
            "generation-retry": do_gen_retry, "generation-dismiss": do_gen_dismiss}
 
 

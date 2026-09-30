@@ -299,6 +299,51 @@ class Server(unittest.TestCase):
         self.assertIn("- No new dependencies", prompt)
         self.assertIn("Day only", prompt)
 
+    def test_attachments_numbered_and_typed(self):
+        b64 = base64.b64encode(b"print(1)\n").decode()
+        body = {"topic": "Explain the script please", "project": PROJECT, "attachments": [
+            {"name": "image.png", "data": b64}, {"name": "image.png", "data": b64},
+            {"name": "tool.py", "data": b64}, {"name": "old.doc", "data": b64}]}
+        code, out = self.req("/api/generate", body)
+        self.assertEqual(code, 200, out)
+        folder = os.path.join(DATA, "attachments", out["id"])
+        self.assertEqual(sorted(os.listdir(folder)),
+                         ["image-2.png", "image.png", "old.doc", "old.doc.txt", "tool.py"])
+
+    def test_state_has_week_ui_and_deploy_hint(self):
+        s = self.req("/api/state")[1]
+        self.assertEqual(len(s["ui"]), 12)
+        self.assertEqual(set(s["week"]), {"plans", "goal_met", "judged", "cost_usd"})
+        self.assertEqual(s["without_deploy"], [])  # deploys are off in the test config
+
+    def test_draft_shows_full_prompt(self):
+        config.write_json(os.path.join(DATA, "drafts", "p1.json"), example_plan())
+        card = next(d for d in self.req("/api/state")[1]["drafts"] if d["name"] == "p1.json")
+        self.assertTrue(card["runs"][0]["prompt"])
+        self.assertEqual(card["runs"][0]["cwd"], PROJECT)
+        os.unlink(os.path.join(DATA, "drafts", "p1.json"))
+
+    def test_withdraw_only_before_start_and_close_only_when_idle(self):
+        os.makedirs(os.path.join(DATA, "queue"), exist_ok=True)
+        config.write_json(os.path.join(DATA, "queue", "w1.json"), example_plan())
+        self.assertEqual(self.req("/api/withdraw", {"plan": "w1.json"})[0], 200)
+        self.assertFalse(os.path.exists(os.path.join(DATA, "queue", "w1.json")))
+
+        config.write_json(os.path.join(DATA, "queue", "w2.json"), example_plan())
+        run = os.path.join(DATA, "runs", "w2-run")
+        os.makedirs(run, exist_ok=True)
+        meta = {"run_id": "w2-run", "plan": "w2.json", "key": "map-todos", "status": "running",
+                "cwd": PROJECT}
+        config.write_json(os.path.join(run, "meta.json"), meta)
+        self.assertEqual(self.req("/api/withdraw", {"plan": "w2.json"})[0], 409)
+        self.assertEqual(self.req("/api/close", {"plan": "w2.json"})[0], 409)
+        meta["status"] = "done"
+        config.write_json(os.path.join(run, "meta.json"), meta)
+        self.assertEqual(self.req("/api/close", {"plan": "w2.json"})[0], 200)
+        shutil.rmtree(run)
+        for n in ("w2.json", "w2.closed.json"):
+            os.unlink(os.path.join(DATA, "queue", n))
+
     def test_images_inline_svg_downloads(self):
         art = os.path.join(DATA, "runs", "img1", "artifacts")
         os.makedirs(art, exist_ok=True)
