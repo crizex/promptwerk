@@ -250,8 +250,11 @@ async function showRun(rid) {
     h("p", {}, badge(m.status), ` ${m.mode}, ${usd(m.cost_usd)}, ${m.turns || 0} turns`),
     m.note ? h("p", { class: "meta" }, m.note) : null,
     m.check ? h("pre", {}, `$ ${m.check.command}\nexit ${m.check.code}\n${m.check.output || ""}`) : null,
-    d.artifacts.length ? h("section", {}, h("h3", {}, "Artifacts"), list(d.artifacts, (a) =>
-      h("a", { href: `/api/artifact/${encodeURIComponent(rid)}/${encodeURIComponent(a)}`, target: "_blank", rel: "noopener" }, a))) : null,
+    d.artifacts.length ? h("section", {}, h("h3", {}, "Artifacts"), list(d.artifacts, (a) => {
+      const href = `/api/artifact/${encodeURIComponent(rid)}/${encodeURIComponent(a)}`;
+      const link = h("a", { href, target: "_blank", rel: "noopener" }, a);
+      return /\.(png|jpe?g|gif|webp)$/i.test(a) ? [link, h("img", { class: "shot", src: href, alt: a, loading: "lazy" })] : link;
+    })) : null,
     h("section", {}, h("h3", {}, "Log"), h("pre", { class: "log" }, d.log.join("\n") || "No output yet.")),
     h("details", {}, h("summary", {}, "Prompt"), h("pre", {}, d.prompt)),
     h("button", { class: "button ghost", type: "button", on: { click: () => show({ kind: "plan", name: m.plan }) } }, "Back to plan"));

@@ -47,6 +47,10 @@ STATIC = {"/": "index.html", "/app.js": "app.js", "/style.css": "style.css",
           "/favicon.svg": "favicon.svg"}
 TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
          ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".woff2": "font/woff2"}
+# Raster images from runs and attachments are shown inline. SVG is left out on purpose:
+# it can carry script, so it stays a download like every other unknown type.
+IMAGES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+          ".gif": "image/gif", ".webp": "image/webp"}
 CSP = ("default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; "
        "font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; "
        "form-action 'self'")
@@ -567,8 +571,10 @@ class Handler(BaseHTTPRequestHandler):
                 data = f.read()
         except OSError:
             return self.send(404, {"error": "not found"})
-        if download:  # user content: plain text or attachment, never rendered as a page
+        if download:  # user content: plain text, image or attachment, never rendered as a page
             ext = os.path.splitext(path)[1].lower()
+            if ext in IMAGES:
+                return self.send(200, data, IMAGES[ext])
             text = ext in (".md", ".txt", ".json", ".log", ".csv", ".yaml", ".yml")
             return self.send(200, data, "text/plain; charset=utf-8" if text else "application/octet-stream",
                              None if text else {"Content-Disposition": "attachment"})

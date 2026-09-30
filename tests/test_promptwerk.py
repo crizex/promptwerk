@@ -299,6 +299,21 @@ class Server(unittest.TestCase):
         self.assertIn("- No new dependencies", prompt)
         self.assertIn("Day only", prompt)
 
+    def test_images_inline_svg_downloads(self):
+        art = os.path.join(DATA, "runs", "img1", "artifacts")
+        os.makedirs(art, exist_ok=True)
+        for name in ("shot.png", "evil.svg"):
+            with open(os.path.join(art, name), "wb") as f:
+                f.write(b"x")
+        auth = {"Authorization": "Basic " + base64.b64encode(f"promptwerk:{self.pw}".encode()).decode()}
+
+        def head(name):
+            r = urllib.request.Request(f"{self.base}/api/artifact/img1/{name}", headers=auth)
+            with urllib.request.urlopen(r, timeout=10) as resp:
+                return resp.headers["Content-Type"], resp.headers.get("Content-Disposition")
+        self.assertEqual(head("shot.png"), ("image/png", None))
+        self.assertEqual(head("evil.svg"), ("application/octet-stream", "attachment"))
+
     def test_path_traversal(self):
         for path in ("/api/run/..%2F..%2Fetc", "/api/artifact/x/..", "/api/artifact/..%2F..%2F/x",
                      "/fonts/..%2F..%2Fbin%2Fconfig.py"):
