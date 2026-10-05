@@ -3,6 +3,13 @@
 All notable changes to Promptwerk. Versions follow [Semantic Versioning](https://semver.org/).
 Downloads are on the [releases page](https://github.com/crizex/promptwerk/releases).
 
+## 1.4.1
+
+- The detail drawer now opens at the top. Before, it kept the scroll position of the previous
+  plan or draft, so a finished plan could open at its run list instead of its verdict.
+- New README demo animation showing the 1.4 flow: how the sentence is read, the workshop, the
+  approval, the verdict and the command palette.
+
 ## 1.4.0
 
 The biggest update so far: a second mode for plain prompts, follow-ups that remember, a verdict

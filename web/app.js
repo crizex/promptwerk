@@ -370,6 +370,7 @@ function show(what) {
   $("detailBody").dataset.for = "";
   renderDetail();
   if (!$("detail").open) $("detail").showModal();
+  $("detail").scrollTop = 0;
 }
 
 function list(items, fn) {
@@ -560,6 +561,7 @@ async function showRun(rid) {
     h("details", {}, h("summary", {}, "Prompt"), h("pre", {}, d.prompt)),
     h("button", { class: "button ghost", type: "button", on: { click: () => show({ kind: "plan", name: m.plan }) } }, "Back to plan"));
   if (!$("detail").open) $("detail").showModal();
+  $("detail").scrollTop = 0;
 }
 
 // ------------------------------------------------------------------ artifacts

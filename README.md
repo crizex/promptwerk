@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="assets/demo.gif" alt="Demo: one rough sentence becomes a draft plan, the plan gets approved, and the board shows both runs finishing" width="100%">
+  <img src="assets/demo.gif" alt="Demo: a rough sentence is read back, the planner drafts two runs, the draft gets approved, both runs finish, the plan shows its verdict, and the command palette finds it again" width="100%">
 </p>
 
 <p align="center">
