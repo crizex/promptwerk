@@ -33,11 +33,12 @@ import attachment_text  # noqa: E402
 import check_plan  # noqa: E402
 import config  # noqa: E402
 import constraints  # noqa: E402
+import findings_draft  # noqa: E402
 import notify  # noqa: E402
 
 C = config.C
-DRAFTS, QUEUE, RUNS, LOGS, ATTACH = (config.DRAFTS, config.QUEUE, config.RUNS,
-                                     config.LOGS, config.ATTACH)
+DRAFTS, QUEUE, RUNS, LOGS, ATTACH, PROMPTS = (config.DRAFTS, config.QUEUE, config.RUNS,
+                                              config.LOGS, config.ATTACH, config.PROMPTS)
 MAX_BODY = 32 * 1024 * 1024
 MAX_FILES, MAX_FILES_BYTES = 10, 20 * 1024 * 1024
 ATTACH_EXT = {".txt", ".md", ".json", ".csv", ".log", ".yaml", ".yml", ".xml", ".html",
@@ -136,7 +137,7 @@ def generations():
         g = config.read_json(os.path.join(LOGS, n)) or {}
         if not g.get("id"):
             continue
-        if any(os.path.exists(os.path.join(d, g["id"] + ".json")) for d in (DRAFTS, QUEUE)):
+        if any(os.path.exists(os.path.join(d, g["id"] + ".json")) for d in (DRAFTS, QUEUE, PROMPTS)):
             forget_generation(g["id"])  # it produced its draft; the record has done its job
             continue
         try:
@@ -148,7 +149,7 @@ def generations():
         stage = [z for z in log.splitlines() if z.startswith("Stage ")]
         out.append({"id": g["id"], "topic": g.get("topic", "")[:300],
                     "project": g.get("project", ""), "started": g.get("started"),
-                    "from_plan": g.get("from_plan"),
+                    "from_plan": g.get("from_plan"), "mode": g.get("mode") or "plan",
                     "running": pid_alive(g.get("pid")), "stage": stage[-1] if stage else "",
                     "log": log})
     return out
@@ -185,7 +186,10 @@ def plan_card(name, metas):
                      "started": m.get("started"),
                      "check_code": (m.get("check") or {}).get("code"),
                      "check_reason": (m.get("check_correction") or {}).get("reason"),
-                     "denials": len(m.get("denials") or [])})
+                     "denials": len(m.get("denials") or []),
+                     "escalated": m.get("escalated"), "model": m.get("model"),
+                     "has_findings": bool(m.get("status") == "done" and m.get("mode") == "read"
+                                          and findings_draft.findings_of(m["run_id"])[0])})
     side = lambda s: config.read_json(path.replace(".json", s))  # noqa: E731
     pw = plan.get("_promptwerk") or {}
     summary = side(".summary.json")
@@ -254,6 +258,12 @@ def successors(plans, drafts, gens):
     return out
 
 
+def prompts(most=30):
+    out = [config.read_json(os.path.join(PROMPTS, n)) for n in listing(PROMPTS)]
+    return sorted((p for p in out if isinstance(p, dict) and p.get("id")),
+                  key=lambda p: p.get("time") or 0, reverse=True)[:most]
+
+
 def state():
     metas = all_metas()
     plans = [plan_card(n, metas) for n in listing(QUEUE) if n.count(".") == 1]
@@ -269,6 +279,7 @@ def state():
             "ui": ui_version(), "week": seven, "without_deploy": without_deploy(),
             "projects": C["projects"], "generations": gens, "drafts": drafts,
             "plans": [p for p in plans if p["name"] in keep], "plans_total": len(plans),
+            "prompts": prompts(),
             "today_usd": round(sum(float(m.get("cost_usd") or 0) for m in metas
                                    if str(m.get("started", "")).startswith(time.strftime("%Y-%m-%d"))), 2),
             "daily_cap_usd": C["budgets"]["daily_cap_usd"]}
@@ -277,7 +288,7 @@ def state():
 def fingerprint():
     """Cheap change detector for the event stream: names and mtimes of everything the UI shows."""
     h = hashlib.sha256()
-    for d in (DRAFTS, QUEUE, LOGS):
+    for d in (DRAFTS, QUEUE, LOGS, PROMPTS):
         for n in listing(d, ""):
             try:
                 h.update(f"{n}{os.path.getmtime(os.path.join(d, n))}".encode())
@@ -350,18 +361,21 @@ def planner_done(p, gid, topic):
     """Wait for the planner and send a note: draft ready to review, or planning failed."""
     p.wait()
     short = topic.strip().splitlines()[0][:80] if topic.strip() else gid
-    if os.path.exists(os.path.join(DRAFTS, gid + ".json")):
+    if os.path.exists(os.path.join(PROMPTS, gid + ".json")):
+        notify.send(f"Promptwerk: prompt ready to copy: '{short}'.", "prompt_ready", {"id": gid})
+    elif os.path.exists(os.path.join(DRAFTS, gid + ".json")):
         notify.send(f"Promptwerk: draft ready for review: '{short}'.", "draft_ready", {"id": gid})
     else:
         notify.send(f"Promptwerk: planning failed for '{short}' (exit {p.returncode}).",
                     "draft_failed", {"id": gid})
 
 
-def start_planner(gid, topic, project, files, from_plan=None):
+def start_planner(gid, topic, project, files, from_plan=None, mode="plan"):
     for d in (LOGS, DRAFTS):
         os.makedirs(d, exist_ok=True)
-    args = [os.path.join(BIN, "planner.py"), "--id", gid]
-    if project:  # empty: the planner infers the project from the text
+    script = "prompt.py" if mode == "prompt" else "planner.py"
+    args = [os.path.join(BIN, script), "--id", gid]
+    if project and mode != "prompt":  # empty: the planner infers the project from the text
         args += ["--project", project]
     if from_plan:
         args += ["--from-plan", from_plan]
@@ -374,14 +388,15 @@ def start_planner(gid, topic, project, files, from_plan=None):
     threading.Thread(target=planner_done, args=(p, gid, topic), daemon=True).start()
     config.write_json(os.path.join(LOGS, f"gen-{gid}.json"),
                       {"id": gid, "topic": topic, "project": project, "files": files,
-                       "from_plan": from_plan, "pid": p.pid, "started": time.time()})
+                       "from_plan": from_plan, "mode": mode, "pid": p.pid, "started": time.time()})
 
 
 def do_generate(body):
     topic = str(body.get("topic") or "").strip()
     if len(topic) < 8:
         raise Refused(400, "Describe the task in at least one sentence.")
-    project = str(body.get("project") or "").strip()
+    mode = "prompt" if body.get("mode") == "prompt" else "plan"
+    project = str(body.get("project") or "").strip() if mode == "plan" else ""
     if project:  # optional; approval still checks every run's cwd against the list
         project = os.path.abspath(os.path.expanduser(project))
         if project not in C["projects"]:
@@ -429,7 +444,7 @@ def do_generate(body):
         except OSError as e:  # disk full or similar: no half-written folder left behind
             shutil.rmtree(folder, ignore_errors=True)
             raise Refused(500, f"Could not store the attachments: {e.strerror or e}")
-    start_planner(gid, topic, project, paths, origin)
+    start_planner(gid, topic, project, paths, origin, mode)
     return {"id": gid}
 
 
@@ -616,6 +631,23 @@ def do_discard(body):
     return {"ok": True}
 
 
+def do_prompt_delete(body):
+    pid = safe_name(body.get("id"))
+    try:
+        os.unlink(os.path.join(PROMPTS, pid + ".json"))
+    except FileNotFoundError:
+        raise Refused(404, "prompt not found")
+    return {"ok": True}
+
+
+def do_findings_draft(body):
+    rid, _ = meta_of(body)
+    try:
+        return {"draft": findings_draft.build(rid)}
+    except ValueError as e:
+        raise Refused(409, str(e))
+
+
 def gen_of(body):
     gid = safe_name(body.get("id"))
     g = config.read_json(os.path.join(LOGS, f"gen-{gid}.json"))
@@ -628,7 +660,8 @@ def do_gen_retry(body):
     gid, g = gen_of(body)
     if pid_alive(g.get("pid")):
         raise Refused(409, "still running")
-    start_planner(gid, g["topic"], g["project"], g.get("files") or [], g.get("from_plan"))
+    start_planner(gid, g["topic"], g["project"], g.get("files") or [], g.get("from_plan"),
+                  g.get("mode") or "plan")
     return {"ok": True}
 
 
@@ -643,7 +676,8 @@ def do_gen_dismiss(body):
 ACTIONS = {"generate": do_generate, "approve": do_approve, "discard": do_discard,
            "cancel": do_cancel, "resume": do_resume, "answer": do_answer, "budget": do_budget,
            "withdraw": do_withdraw, "close": do_close, "reopen": lambda b: do_close(b, False), "summary": do_summary,
-           "generation-retry": do_gen_retry, "generation-dismiss": do_gen_dismiss}
+           "generation-retry": do_gen_retry, "generation-dismiss": do_gen_dismiss,
+           "prompt-delete": do_prompt_delete, "findings-draft": do_findings_draft}
 
 
 # ---------------------------------------------------------------- HTTP

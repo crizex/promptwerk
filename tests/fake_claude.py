@@ -41,7 +41,9 @@ if schema is not None:
                   "next_step": "", "conclusion": "The feature is in and tested.",
                   "happened": ["Mapped the todo code", "Added due dates with tests"],
                   "new_findings": [], "test": ["Add a todo with yesterday's date"],
-                  "acceptance": [], "missing": [], "not_happened": [], "follow_up": ""}, 0.08)
+                  "acceptance": [], "not_happened": [], "follow_up": "",
+                  "missing": [{"what": "Tell your users that todos now have due dates", "who": "you"}],
+                  "register_done": re.findall(r"(R-\d{4}) \(open", prompt)[:1]}, 0.08)
     else:
         with open(os.path.join(ROOT, "examples", "todo-plan.json"), encoding="utf-8") as f:
             plan = json.load(f)
@@ -57,11 +59,20 @@ if schema is not None:
         envelope(plan, 1.1)
     sys.exit(0)
 
+if arg("--output-format") == "json":  # prompt mode: one plain answer, fenced on purpose
+    sys.stdin.read()
+    print(json.dumps({"type": "result", "subtype": "success", "is_error": False, "num_turns": 1,
+                      "total_cost_usd": 0.05,
+                      "result": "```markdown\nCreate a spreadsheet with the columns Date, Item, Amount.\n```"}))
+    sys.exit(0)
+
 # run mode
 prompt = arg("-p") or ""
 resumed = "--resume" in sys.argv
 sid = arg("--session-id") or arg("--resume") or "fake"
-emit({"type": "system", "subtype": "init", "session_id": sid})
+emit({"type": "system", "subtype": "init", "session_id": sid, "model": "fake",
+      "tools": ["Read", "Bash", "mcp__notes__search"], "skills": ["pdf"],
+      "plugins": [{"name": "review", "path": "/x"}], "agents": ["general-purpose"]})
 if "FAKE_QUESTION" in prompt and not resumed:
     text = ('I need one decision.\n```promptwerk:question\n{"question": "Day only or day and time?", '
             '"options": ["Day only", "Day and time"]}\n```')

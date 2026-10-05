@@ -20,6 +20,7 @@ from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import config  # noqa: E402
+import model_choice  # noqa: E402
 import notify  # noqa: E402
 
 C = config.C
@@ -164,7 +165,8 @@ def arguments(run, meta=None):
     if rules:
         extra += ("\n\n# House rules\n\nThey apply to every run, even if the task below does "
                   "not repeat them.\n\n" + rules)
-    args = ["--model", run.get("model") or C["model"], "--effort", run["effort"],
+    model = (meta or {}).get("model") or run.get("model") or C["model"]
+    args = ["--model", model, "--effort", run["effort"],
             "--max-budget-usd", str(remaining_budget(run, meta)),
             "--output-format", "stream-json", "--verbose", "--include-partial-messages"]
     if run["mode"] == "read":
@@ -333,6 +335,7 @@ def check_and_close(rid, meta, run):
         if code != 0:
             meta["status"] = "check_failed"
             write_meta(rid, meta)
+            escalate(rid, meta, "check red", check_failed_text(meta))
             return
     if run.get("post_run"):
         code, out = run_command(run["post_run"], run["cwd"])
@@ -348,6 +351,10 @@ def check_and_close(rid, meta, run):
                 d.write(s.read())
             meta["artifacts_found"].append(a)
     missing = [a for a in run.get("artifacts") or [] if a not in meta["artifacts_found"]]
+    if missing and escalate(rid, meta, "artifacts missing",
+                            "These files the task requires were not produced: "
+                            + ", ".join(missing) + ". Produce them now; keep what is done."):
+        return
     meta["status"] = "incomplete" if missing else "done"
     notes = ["Artifacts not produced: " + ", ".join(missing)] if missing else []
     if (meta.get("post_run") or {}).get("code"):
@@ -356,6 +363,19 @@ def check_and_close(rid, meta, run):
         meta["note"] = " ".join(notes)
     meta["ended"] = now()
     write_meta(rid, meta)
+
+
+def escalate(rid, meta, why, text):
+    """A run on the cheap model that ends with a red check or missing artifacts gets one more
+    turn on the main model, in the same session. Once per run."""
+    cheap = C["models"]["cheap"]
+    if not cheap or meta.get("model") != cheap or cheap == C["model"] or meta.get("escalated"):
+        return False
+    meta["escalated"] = {"time": now(), "from": cheap, "to": C["model"], "reason": why}
+    meta["model"] = C["model"]
+    write_meta(rid, meta)
+    resume(rid, text, kind="escalate")
+    return True
 
 
 def read_run(meta):
@@ -413,7 +433,11 @@ def start(plan_file, key):
             "effort": run["effort"], "budget_usd": run["budget_usd"],
             "personas": len(run.get("personas") or []), "artifacts": run.get("artifacts") or [],
             "status": "running", "started": now(), "cost_usd": 0, "turns": 0,
-            "watcher_pid": os.getpid()}
+            "watcher_pid": os.getpid(), "model": run.get("model") or C["model"]}
+    cheap = C["models"]["cheap"]
+    if cheap and meta["model"] == cheap and model_choice.force_main(run["mode"]):
+        meta["model"] = C["model"]
+        meta["note"] = f"'{run['mode']}' runs fail too often on {cheap}; started on {C['model']}."
     write_meta(rid, meta)
     print(rid, flush=True)
     result = start_process(rid, meta, run, [C["claude_bin"], "-p", run["prompt"],
@@ -437,7 +461,8 @@ def resume(rid, text, kind="answer"):
             {"time": now(), "question": meta.get("question"), "answer": text}]
         meta["question"] = None
     else:
-        meta["resumes"] = meta.get("resumes", []) + [now()]
+        if kind == "resume":  # an escalation is not a retry; the worker's retry stays available
+            meta["resumes"] = meta.get("resumes", []) + [now()]
         meta.pop("ratelimit_until", None)
         meta["note"] = ""
     write_meta(rid, meta)

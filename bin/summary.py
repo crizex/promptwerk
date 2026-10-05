@@ -19,6 +19,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import config  # noqa: E402
+import register  # noqa: E402
 
 C = config.C
 RUNS = config.RUNS
@@ -28,8 +29,12 @@ SCHEMA = {
     "type": "object",
     "additionalProperties": False,
     "required": ["goal_met", "verdict", "touch", "next_step", "conclusion", "happened",
-                 "new_findings", "test", "acceptance", "missing", "not_happened", "follow_up"],
+                 "new_findings", "test", "acceptance", "missing", "not_happened", "follow_up",
+                 "register_done"],
     "properties": {
+        "register_done": {"type": "array", "items": {"type": "string"}, "description":
+                          "Ids (R-0001 ...) of open register items listed below that the run "
+                          "reports prove finished. Only with evidence; empty when unsure."},
         "goal_met": {
             "type": "object", "additionalProperties": False, "required": ["state", "reason"],
             "description": "The verdict against the sentence the operator typed, not against the "
@@ -170,6 +175,9 @@ def build_prompt(mech, metas):
                               "over_budget", "check_red", "denials", "deployed", "finish")},
         ensure_ascii=False, indent=1) + "\n```\n'deployed': null means no deploy is configured "
         "for this project. That is not a flaw.")
+    items = [it for cwd in mech["cwd"] for it in register.open_items(cwd, 30)]
+    if items:
+        lines.append("\n# OPEN REGISTER ITEMS OF THESE PROJECTS\n\n" + register.as_text(items))
     lines.append("\n# RUN REPORTS\n\n" + "\n\n---\n\n".join(reports(metas)))
     return "\n".join(lines)
 
@@ -197,6 +205,8 @@ def generate(plan_file):
         mech["error"] = str(e)[:400]
     target = plan_file.replace(".json", ".summary.json")
     config.write_json(target, mech)
+    if not mech.get("error"):
+        register.add(mech)
     return target
 
 

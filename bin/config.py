@@ -17,6 +17,8 @@ DEFAULTS = {
     "knowledge_dir": "",          # empty: <repo>/knowledge
     "projects": [],               # absolute project dirs a run may use as cwd
     "model": "claude-opus-5-5",
+    # Optional cheaper model the planner may give to simple runs. Empty = off.
+    "models": {"cheap": ""},
     "claude_bin": "claude",
     "budgets": {"planner_usd": 8.0, "summary_usd": 1.5, "run_cap_usd": 25.0,
                 "raise_factor": 1.5, "raise_multiple": 3.0, "daily_cap_usd": 150.0},
@@ -56,14 +58,14 @@ def load():
 
 C = load()
 DATA = C["data_dir"]
-DRAFTS, QUEUE, RUNS, LOGS, ATTACH = (os.path.join(DATA, d) for d in
-                                     ("drafts", "queue", "runs", "logs", "attachments"))
+DRAFTS, QUEUE, RUNS, LOGS, ATTACH, PROMPTS = (
+    os.path.join(DATA, d) for d in ("drafts", "queue", "runs", "logs", "attachments", "prompts"))
 KNOW = C["knowledge_dir"]
 
 
 def ensure_dirs():
     """Data tree private to the owner, no matter whether web or worker starts first."""
-    for d in (DATA, DRAFTS, QUEUE, RUNS, LOGS, ATTACH):
+    for d in (DATA, DRAFTS, QUEUE, RUNS, LOGS, ATTACH, PROMPTS):
         os.makedirs(d, mode=0o700, exist_ok=True)
     os.chmod(DATA, 0o700)
 

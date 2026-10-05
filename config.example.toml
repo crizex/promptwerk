@@ -19,6 +19,13 @@ model = "claude-opus-5-5"
 # Claude Code CLI binary (name on PATH or absolute path).
 claude_bin = "claude"
 
+[models]
+# Optional cheaper model (e.g. "claude-sonnet-5-5") the planner may give to simple runs.
+# Such a run is escalated once to `model` when its check is red or artifacts are missing,
+# and a kind of run (read/build/free) where the cheap model fails too often goes straight
+# to `model`. See bin/model_choice.py. Empty = every run uses `model`.
+cheap = ""
+
 [budgets]
 planner_usd = 8.0      # cap per planner call (draft and critic are two calls)
 summary_usd = 1.5      # cap for the plan summary

@@ -18,6 +18,9 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import check_plan  # noqa: E402
 import config  # noqa: E402
+import model_choice  # noqa: E402
+import project_facts  # noqa: E402
+import register  # noqa: E402
 
 C = config.C
 SCHEMA = os.path.join(config.ROOT, "prompts", "plan.schema.json")
@@ -70,7 +73,13 @@ def read(path, limit=None):
 
 
 def snapshot(project, readme_lines=80):
-    """What the planner knows about a project: its profile, else a tiny automatic snapshot."""
+    """What the planner knows about a project: its profile, else a tiny automatic snapshot,
+    plus facts read from the file system right now (stack, git, check command)."""
+    return "\n\n".join(x for x in (_snapshot(project, readme_lines),
+                                    project_facts.facts(project)) if x)
+
+
+def _snapshot(project, readme_lines):
     prof = os.path.join(config.KNOW, "projects", config.slug(project) + ".md")
     if os.path.isfile(prof):
         return read(prof)
@@ -103,6 +112,14 @@ def knowledge_block(project):
         out += [f"## {p}", "", snapshot(p, 80 if project else 15), ""]
     if not project and not C["projects"]:
         out.append("No projects are configured. Use the directory the user names.")
+    items = register.open_items(project, 15) if project else []
+    if items:
+        out += ["# OPEN POINTS OF THIS PROJECT", "",
+                "Left open by earlier plans. Take one in only if it fits this task; never "
+                "plan around one as if it were solved.", "", register.as_text(items), ""]
+    choice = model_choice.planner_block()
+    if choice:
+        out += [choice, ""]
     return "\n".join(out)
 
 

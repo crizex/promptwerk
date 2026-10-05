@@ -29,7 +29,7 @@ def known_tools():
     if not os.path.isfile(p):
         return None
     t = config.read_json(p, {})
-    return {n for k in ("tools", "skills", "plugins", "agents") for n in t.get(k, [])}
+    return {n for k in ("tools", "mcp_tools", "skills", "plugins", "agents") for n in t.get(k, [])}
 
 
 def find_cycle(runs):

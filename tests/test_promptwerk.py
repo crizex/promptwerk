@@ -39,6 +39,9 @@ sys.path.insert(0, os.path.join(ROOT, "bin"))
 import check_plan  # noqa: E402
 import config  # noqa: E402
 import constraints  # noqa: E402
+import model_choice  # noqa: E402
+import project_facts  # noqa: E402
+import register  # noqa: E402
 import rights  # noqa: E402
 import write_guard  # noqa: E402
 
@@ -191,6 +194,10 @@ class EndToEnd(unittest.TestCase):
         self.assertEqual(summary["goal_met"]["state"], "yes")
         self.assertEqual(summary["finished"], 2)
         self.assertEqual(config.read_json(plan_file.replace(".json", ".finish.json")), [])
+        item = next(it for it in register.open_items(PROJECT) if it["plan"] == "t1.json")
+        self.assertEqual((item["kind"], item["who"]), ("open", "you"))
+        import planner
+        self.assertIn(item["id"], planner.knowledge_block(PROJECT))
 
     def test_question_and_budget(self):
         plan = example_plan()
@@ -215,6 +222,90 @@ class EndToEnd(unittest.TestCase):
         meta = config.read_json(os.path.join(DATA, "runs", rid, "meta.json"))
         self.assertEqual(meta["status"], "budget_exhausted")
         self.assertEqual(meta["budget_usd"], 3.0)  # 2 USD * raise_factor 1.5
+
+
+class Knowledge(unittest.TestCase):
+    def test_register_is_idempotent_and_closes_by_id(self):
+        s = {"plan": "r1.json", "cwd": [PROJECT], "new_findings": ["Login has no rate limit"],
+             "missing": [{"what": "Rotate the key", "who": "you"}, {"what": "Dark mode", "who": "not_requested"}]}
+        register.add(s)
+        register.add(s)
+        mine = [it for it in register.open_items(PROJECT) if it["plan"] == "r1.json"]
+        self.assertEqual(sorted(it["text"] for it in mine), ["Login has no rate limit", "Rotate the key"])
+        register.add({"plan": "r2.json", "cwd": [PROJECT], "register_done": [mine[0]["id"]]})
+        self.assertNotIn(mine[0]["id"], [it["id"] for it in register.open_items(PROJECT)])
+
+    def test_check_command_derived_and_overridden(self):
+        proj = os.path.join(TMP, "web-app")
+        os.makedirs(proj, exist_ok=True)
+        config.write_json(os.path.join(proj, "package.json"),
+                          {"scripts": {"build": "x", "dev": "x", "test": "x"}, "dependencies": {"next": "15"}})
+        self.assertEqual(project_facts.check_command(proj), "npm run test && npm run build")
+        self.assertIn("Next.js", project_facts.facts(proj))
+        self.assertIsNone(project_facts.check_command(PROJECT))
+        over = os.path.join(config.KNOW, "check-commands.json")
+        self.assertFalse(os.path.exists(over))  # never touch a real one
+        try:
+            config.write_json(over, {"web-app": "make check"})
+            self.assertEqual(project_facts.check_command(proj), "make check")
+        finally:
+            os.unlink(over)
+
+    def test_model_choice_forces_main_model_for_failing_kind(self):
+        saved = config.C["models"]["cheap"]
+        config.C["models"]["cheap"] = "claude-sonnet-5-5"
+        try:
+            ok = {"mode": "read", "model": "claude-sonnet-5-5", "status": "done"}
+            bad = {"mode": "build", "model": "claude-sonnet-5-5", "status": "done",
+                   "escalated": {"from": "claude-sonnet-5-5"}}
+            self.assertFalse(model_choice.force_main("build", [bad] * 3))  # too few runs
+            self.assertTrue(model_choice.force_main("build", [bad] * 2 + [dict(ok, mode="build")] * 2))
+            self.assertFalse(model_choice.force_main("read", [ok] * 5))
+            self.assertIn("| build | sonnet | 4 | 2 | use the main model |",
+                          model_choice.table([bad] * 2 + [dict(ok, mode="build")] * 2))
+        finally:
+            config.C["models"]["cheap"] = saved
+
+
+class CheapModel(unittest.TestCase):
+    """Escalation and tools.json need their own config: a cheap model and a private knowledge dir."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.know = os.path.join(TMP, "know")
+        os.makedirs(cls.know, exist_ok=True)
+        cls.cfg = os.path.join(TMP, "config-cheap.toml")
+        with open(cls.cfg, "w") as f:
+            f.write(f'projects = ["{PROJECT}"]\nknowledge_dir = "{cls.know}"\n'
+                    '[models]\ncheap = "claude-sonnet-5-5"\n[notify]\nwebhook_url = ""\n')
+        cls.env = {**ENV, "PROMPTWERK_CONFIG": cls.cfg}
+
+    def py(self, *args):
+        return subprocess.run([sys.executable, *args], env=self.env, capture_output=True, text=True,
+                              timeout=60, cwd=ROOT)
+
+    def test_red_check_escalates_once_to_main_model(self):
+        plan = example_plan()
+        run = dict(plan["runs"][1], id="cheap", needs=[], check="false", model="claude-sonnet-5-5")
+        plan["runs"] = [run]
+        path = os.path.join(DATA, "queue", "c1.json")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        config.write_json(path, plan)
+        rid = self.py(os.path.join(ROOT, "bin", "run.py"), "start", path, "cheap").stdout.split()[0]
+        meta = config.read_json(os.path.join(DATA, "runs", rid, "meta.json"))
+        self.assertEqual(meta["status"], "check_failed")
+        self.assertEqual(meta["escalated"]["from"], "claude-sonnet-5-5")
+        self.assertEqual(meta["model"], "claude-opus-5-5")
+        self.assertNotIn("resumes", meta)  # the worker's own retry is still available
+        shutil.rmtree(os.path.join(DATA, "runs", rid))
+        os.unlink(path)
+
+    def test_tools_refresh_writes_tools_json(self):
+        p = self.py(os.path.join(ROOT, "bin", "tools.py"), "refresh", "--force")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        t = config.read_json(os.path.join(self.know, "tools.json"))
+        self.assertEqual((t["tools"], t["mcp_tools"], t["plugins"]), (["Bash", "Read"], ["mcp__notes__search"], ["review"]))
+        self.assertIn("nothing to do", self.py(os.path.join(ROOT, "bin", "tools.py"), "refresh").stdout)
 
 
 def free_port():
@@ -431,6 +522,42 @@ class Server(unittest.TestCase):
             shutil.rmtree(os.path.join(DATA, "runs", rid))
         os.unlink(os.path.join(DATA, "queue", "d1.json"))
         shutil.rmtree(os.path.join(DATA, "runs", ".locks"), ignore_errors=True)
+
+    def test_prompt_mode_writes_a_prompt_and_delete_removes_it(self):
+        code, out = self.req("/api/generate", {"topic": "A spreadsheet for my utility bill", "mode": "prompt",
+                                               "project": "/ignored/in/prompt/mode"})
+        self.assertEqual(code, 200, out)
+        p = self.wait_for(os.path.join(DATA, "prompts", out["id"] + ".json"))
+        self.assertEqual(p["prompt"], "Create a spreadsheet with the columns Date, Item, Amount.")
+        self.assertEqual(self.req("/api/state")[1]["prompts"][0]["id"], out["id"])
+        self.assertEqual(self.req("/api/prompt-delete", {"id": out["id"]})[0], 200)
+        self.assertEqual(self.req("/api/prompt-delete", {"id": out["id"]})[0], 404)
+
+    def test_findings_become_a_chained_draft_by_severity(self):
+        rid = "f1-run"
+        art = os.path.join(DATA, "runs", rid, "artifacts")
+        os.makedirs(art, exist_ok=True)
+        meta = {"run_id": rid, "plan": "f1.json", "key": "audit", "title": "UI audit", "mode": "read",
+                "status": "running", "cwd": PROJECT}
+        config.write_json(os.path.join(DATA, "runs", rid, "meta.json"), meta)
+        config.write_json(os.path.join(art, "ui-findings.json"), [
+            {"id": "UI-1", "severity": "HIGH", "title": "Button unreadable", "file": "app.css", "line": 3,
+             "description": "contrast 2:1", "remediation": "darker text"},
+            {"id": "UI-2", "severity": "LOW", "title": "Typo", "remediation": "fix it"}])
+        self.assertEqual(self.req("/api/findings-draft", {"run_id": rid})[0], 409)  # not done yet
+        meta["status"] = "done"
+        config.write_json(os.path.join(DATA, "runs", rid, "meta.json"), meta)
+        code, out = self.req("/api/findings-draft", {"run_id": rid})
+        self.assertEqual(code, 200, out)
+        draft = config.read_json(os.path.join(DATA, "drafts", out["draft"]))
+        self.assertEqual([r["id"] for r in draft["runs"]], ["fix-critical-high", "fix-low"])
+        self.assertEqual(draft["runs"][1]["needs"], ["fix-critical-high"])
+        self.assertEqual(draft["runs"][0]["mode"], "free")  # todo-app has no check command
+        self.assertIn("UI-1", draft["runs"][0]["prompt"])
+        self.assertEqual(draft["_promptwerk"]["from_plan"], "f1.json")
+        self.assertEqual(check_plan.check(draft), [])
+        os.unlink(os.path.join(DATA, "drafts", out["draft"]))
+        shutil.rmtree(os.path.join(DATA, "runs", rid))
 
     def test_path_traversal(self):
         for path in ("/api/run/..%2F..%2Fetc", "/api/artifact/x/..", "/api/artifact/..%2F..%2F/x",
