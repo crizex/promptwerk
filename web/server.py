@@ -197,10 +197,55 @@ def plan_card(name, metas):
         summary = {k: v for k, v in summary.items() if k not in SUMMARY_DUPLICATES}
     return {"name": name, "topic": plan.get("topic"), "rationale": plan.get("rationale"),
             "goal": pw.get("topic_raw", ""), "runs": runs, "from_plan": pw.get("from_plan"),
+            "project": pw.get("project") or next((r.get("cwd") for r in plan.get("runs") or []), ""),
             "summary": summary, "finish": side(".finish.json"),
             "approved": pw.get("approved"),
             "closed": os.path.exists(path.replace(".json", ".closed.json")),
             "summarizing": name in SUMMARIES}
+
+
+def verdict(card):
+    """Computed verdict of a finished plan: good, partial or no, with reasons, the one next
+    step and what only the operator can do. None while runs are still open."""
+    if not card["closed"] and any(r["status"] not in ("done", "incomplete", "discarded") for r in card["runs"]):
+        return None
+    s = card["summary"] or {}
+    no, part = [], []
+    goal = (s.get("goal_met") or {}).get("state")
+    # the operator's sentence ranks above the acceptance points the planner derived from it
+    if goal == "no":
+        no.append("the goal of the task is not met")
+    if goal == "partial":
+        part.append("the goal of the task is only partly met")
+    if s.get("check_red"):
+        no.append("the check was red")
+    if s.get("runs") and (s.get("finished") or 0) < s["runs"]:
+        no.append(f"only {s.get('finished') or 0} of {s['runs']} runs finished")
+    acc = s.get("acceptance") or []
+    failed = [a for a in acc if a.get("met") == "no"]
+    unproven = [a for a in acc if a.get("met") == "unproven"]
+    if failed:
+        no.append(f"{len(failed)} of {len(acc)} promised points not met")
+    if unproven:
+        part.append(f"{len(unproven)} of {len(acc)} promised points not proven")
+    if s.get("deployed") is False:  # None means no deploy is set up, which is no flaw
+        part.append("the deploy failed: the change is in the code, not live")
+    mine = [m for m in s.get("missing") or [] if m.get("who") == "run"]
+    if mine:
+        part.append(f"{len(mine)} point(s) of the task still open")
+    if s.get("over_budget"):
+        part.append(f"{len(s['over_budget'])} run(s) over budget")
+    if s.get("error"):
+        part.append("the narrated part of the summary failed, only the numbers stand")
+    if not card["summary"]:
+        part.append("no summary yet")
+    level = "no" if no else "partial" if part else "good"
+    return {"level": level,
+            "word": {"good": "Usable", "partial": "Usable with limits", "no": "Not finished"}[level],
+            "reasons": no or part,
+            "step": s.get("next_step") or (mine[0].get("what") if mine else ""),
+            "touch": s.get("touch") or (s.get("test") or [""])[0],
+            "your_move": [m.get("what") for m in s.get("missing") or [] if m.get("who") == "you"]}
 
 
 def ui_version():
@@ -272,6 +317,7 @@ def state():
     after = successors(plans, drafts, gens)
     for p in plans:
         p["successors"] = after.get(p["name"], [])
+        p["verdict"] = verdict(p)
     seven = week(metas, plans)  # before trimming: the week counts every plan
     newest = sorted(plans, key=lambda p: p["approved"] or 0, reverse=True)
     keep = {p["name"] for i, p in enumerate(newest) if i < VISIBLE or active(p)}

@@ -267,6 +267,30 @@ class Knowledge(unittest.TestCase):
             config.C["models"]["cheap"] = saved
 
 
+class Verdict(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        sys.path.insert(0, os.path.join(ROOT, "web"))
+        import server
+        cls.v = staticmethod(server.verdict)
+
+    def card(self, summary, status="done"):
+        return {"closed": False, "runs": [{"status": status}], "summary": summary}
+
+    def test_levels(self):
+        self.assertIsNone(self.v(self.card({}, "running")))
+        good = {"goal_met": {"state": "yes"}, "runs": 1, "finished": 1, "touch": "Open /todos",
+                "missing": [{"what": "Tell users", "who": "you"}]}
+        r = self.v(self.card(good))
+        self.assertEqual((r["level"], r["touch"], r["your_move"]), ("good", "Open /todos", ["Tell users"]))
+        r = self.v(self.card(dict(good, deployed=False, missing=[{"what": "Email", "who": "run"}])))
+        self.assertEqual((r["level"], r["step"], len(r["reasons"])), ("partial", "Email", 2))
+        self.assertEqual(self.v(self.card(dict(good, deployed=None)))["level"], "good")
+        r = self.v(self.card(dict(good, check_red=["x"], goal_met={"state": "partial"})))
+        self.assertEqual((r["level"], r["reasons"]), ("no", ["the check was red"]))
+        self.assertEqual(self.v(self.card(None))["reasons"], ["no summary yet"])
+
+
 class CheapModel(unittest.TestCase):
     """Escalation and tools.json need their own config: a cheap model and a private knowledge dir."""
 
