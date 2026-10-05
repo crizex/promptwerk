@@ -50,24 +50,40 @@ flowchart TB
     G --> H["Checked result<br>check command + summary"]
 ```
 
-1. **You write one sentence** in the web UI, pick a project and optionally attach files
-   (pick, paste a screenshot or drop them on the form).
+1. **You write one sentence** in the web UI, pick a project (or let the planner infer it from
+   the text) and optionally attach files (pick, paste a screenshot or drop them on the form).
+   While you type, a "How I read this" box highlights project, read and build words, delivery
+   and file names. If you only need a prompt to paste into a chat, switch to **Only write a
+   prompt**: one call, nothing runs, the result lands on a card with a copy button.
 2. **The planner** (two Claude calls: a draft and a critic) turns it into a plan: one or more
    runs, each with a mode (`read` or `build`), effort, budget, artifacts, acceptance criteria,
    an optional shell check and dependencies on other runs. Open questions come back as
-   clarifications, with the assumption the planner would make.
+   clarifications, with the assumption the planner would make. The planner also sees facts
+   about the project (git, stack, derived check command), its open points from earlier plans
+   and, if configured, which kinds of runs the cheaper model handles well. The workshop card
+   shows the stages: A draft, B check, C critic, D your approval.
 3. **You review the draft.** Answer the questions (or tap one of the planner's suggestions), add
-   constraints, read the full prompt and working directory of every run, see your attachments.
+   constraints, read the full prompt and working directory of every run, see your attachments,
+   the budget per run as a bar and the order of runs as a small graph.
    `check_plan.py` flags cycles, unknown projects and scope problems; fatal findings disable
    the approve button.
 4. **The worker** picks up approved plans, starts runs whose dependencies are done, never two in
    the same directory, and stops starting new work at the daily cap or the usage limit.
 5. **Each run** is a headless `claude -p` process with hooks: read runs may only write their
    artifacts, build runs cannot commit, push or do irreversible deletes. A run that needs a decision
-   pauses and asks you in the UI.
+   pauses and asks you in the UI. A run on the cheaper model that ends with a red check or
+   missing artifacts is escalated once to the main model. A run that shows no progress for six
+   hours is flagged.
 6. **After a run** its check command runs. After the plan, a short summary states whether the
-   goal was met, what to try, what is missing and a suggested follow-up. Artifacts open right in
-   the UI: Markdown rendered, JSON finding lists as a table sorted by severity, images inline.
+   goal was met, what to try, what is missing and a suggested follow-up, topped by a computed
+   verdict: usable, usable with limits, or not finished, with the reasons. Open points go into a
+   register that later plans of the same project see. **Follow up** starts a new task that knows
+   the earlier plan; both link to each other. A finished read run with a findings list can be
+   turned into an implementation draft with one button. Artifacts open right in the UI: Markdown
+   rendered, JSON finding lists as a table sorted by severity, images inline.
+
+Keyboard: `Ctrl K` (or `Cmd K`) opens a command palette to jump to any draft, plan or prompt,
+`N` jumps to a new task, `Escape` closes one layer at a time.
 
 ## Screenshots
 
@@ -168,9 +184,11 @@ to see a run that asks you something, `FAKE_SLOW` for one that keeps running.
 python3 -m unittest discover tests
 ```
 
-24 tests: plan checks, constraints, both hooks, the full flow planner to summary with the fake
-binary, questions and budget raises, and the web server (auth, headers, validation, approval
-rules, attachments, withdraw and close rules, path traversal).
+35 tests: plan checks, constraints, both hooks, the full flow planner to summary with the fake
+binary, questions and budget raises, prompt mode, register, project facts, model choice and
+escalation, the implementation draft, the verdict, and the web server (auth, headers,
+validation, approval rules, attachments, withdraw and close rules, follow-ups, one run per
+directory on answer and resume, path traversal).
 
 ## Safety model
 
@@ -204,6 +222,7 @@ key has a default except `projects`.
 | `projects` | `[]` | Directories runs may work in |
 | `model` | `claude-opus-5-5` | Model for planner, runs and summary; a run may override it |
 | `claude_bin` | `claude` | Claude Code CLI binary |
+| `models.cheap` | empty | Optional cheaper model for simple runs, escalated once to `model` on failure |
 | `budgets.planner_usd` | `8.0` | Cap per planner call |
 | `budgets.summary_usd` | `1.5` | Cap for the plan summary |
 | `budgets.run_cap_usd` | `25.0` | Hard cap per run, also after raises |
@@ -220,8 +239,18 @@ Environment overrides: `PROMPTWERK_CONFIG`, `PROMPTWERK_DATA_DIR`, `PROMPTWERK_C
 `PROMPTWERK_PASSWORD`, `PROMPTWERK_PORT`.
 
 **Knowledge.** The planner reads `knowledge/personas.md` and `knowledge/conventions.md`, plus
-your own `knowledge/house-rules.md` and `knowledge/tools.json` (copy the `.example` files) and
-an optional profile per project in `knowledge/projects/`. Your versions are gitignored.
+your own `knowledge/house-rules.md` and `knowledge/tools.json` and an optional profile per
+project in `knowledge/projects/`. Your versions are gitignored. `knowledge/check-commands.json`
+(`{"<project folder name>": "<command>"}`) overrides the derived check command of a project.
+
+**Helper commands.**
+
+| Command | What it does |
+| --- | --- |
+| `bin/tools.py refresh [--force]` | Writes `knowledge/tools.json` from what your `claude` CLI really has (tools, MCP tools, skills, plugins, agents); at most every 12 hours |
+| `bin/register.py list` / `done <id>` | Open points collected from plan summaries |
+| `bin/findings_draft.py <run id>` | Implementation draft from a finished read run's findings |
+| `bin/prompt.py "<sentence>"` | One finished prompt, same as the prompt mode in the UI |
 
 ## Run statuses
 
@@ -241,9 +270,10 @@ an optional profile per project in `knowledge/projects/`. Your versions are giti
 ## Project layout
 
 ```
-bin/        planner, check_plan, worker, run, summary, hooks (rights, write_guard), config
+bin/        planner, check_plan, worker, run, summary, hooks (rights, write_guard), config,
+            prompt, register, project_facts, model_choice, tools, findings_draft
 web/        stdlib HTTP server, one HTML page, vanilla JS, CSS, fonts
-prompts/    planner meta prompt and plan JSON schema
+prompts/    planner meta prompt, plan JSON schema, brief for prompt mode
 knowledge/  personas, conventions, examples for house rules and tools
 examples/   an example plan
 systemd/    unit files for the web UI and the worker

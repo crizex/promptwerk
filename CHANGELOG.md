@@ -3,6 +3,48 @@
 All notable changes to Promptwerk. Versions follow [Semantic Versioning](https://semver.org/).
 Downloads are on the [releases page](https://github.com/crizex/promptwerk/releases).
 
+## 1.4.0
+
+The biggest update so far: a second mode for plain prompts, follow-ups that remember, a verdict
+per plan, and a reworked board.
+
+**Writing a task**
+- New mode **Only write a prompt**: one call turns your sentence into a finished prompt to paste
+  into any chat. Nothing runs. Prompts show as cards with Copy and Delete.
+- The project is optional: **Infer from the text** lets the planner pick it from your sentence.
+- "How I read this" highlights project, read and build words, delivery and file names while you
+  type, with a short forecast of what the planner will do.
+- Workshop card with the planner's stages: A draft, B check, C critic, D your approval.
+
+**Planning**
+- The planner sees project facts: git setup, stack, npm scripts and a derived check command.
+  Override it per project in `knowledge/check-commands.json`.
+- Open points from earlier summaries are kept in a register (`bin/register.py`); the planner
+  sees those of the chosen project, and a summary can mark them as done.
+- `bin/tools.py refresh` writes `knowledge/tools.json` from what your `claude` CLI really has.
+  The plan check also knows MCP tools now.
+- Optional cheaper model (`[models] cheap`). A run on it that ends with a red check or missing
+  artifacts is escalated once to the main model; kinds of runs where it fails too often go
+  straight to the main model.
+
+**Plans and runs**
+- **Follow up** on a finished plan starts a new task that knows the earlier plan. Plans, drafts
+  and planner cards show what they follow up, and the earlier plan lists its follow-ups.
+- Computed verdict on every finished plan: usable, usable with limits, or not finished, with the
+  reasons, the next step and what only you can do.
+- Budget bar and a dependency graph of the runs in drafts and plans.
+- A finished read run with a findings list can be turned into an implementation draft
+  (CRITICAL and HIGH first, then MEDIUM, then LOW) with one button.
+- Runs show a corrected check command with its reason, denied tool calls, the model and an
+  escalation. A run with no progress for six hours is flagged.
+- Answering or resuming a run is refused while another run works in the same directory.
+
+**Board**
+- Plan details open in a side drawer. Messages appear as toasts instead of browser alerts.
+- Command palette with `Ctrl K` / `Cmd K`, `N` for a new task, `Escape` closes one layer at a time.
+- The Done lane shows the newest eight with "Show all"; the state sends the newest 20 plans plus
+  all active ones and says how many older ones are hidden. The 7-day overview still counts all.
+
 ## 1.3.0
 
 A larger update for everyday use.
