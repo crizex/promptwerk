@@ -88,12 +88,12 @@ Keyboard: `Ctrl K` (or `Cmd K`) opens a command palette to jump to any draft, pl
 ## Screenshots
 
 <p align="center">
-  <img src="assets/board-desktop.png" alt="Board with three lanes: needs you, running, done" width="100%">
+  <img src="assets/board-desktop.png" alt="Board: the task form with How I read this, a planner card at stage B, and the three lanes needs you, running, done" width="100%">
 </p>
 
 | Reviewing a draft | Plan summary |
 | --- | --- |
-| <img src="assets/draft-review.png" alt="Draft with a clarification, two runs and the approve button"> | <img src="assets/plan-summary.png" alt="Finished plan with goal met, what to try and the follow-up"> |
+| <img src="assets/draft-review.png" alt="Draft in the side drawer: follow-up link, a clarification with suggestions, budget bar and run graph"> | <img src="assets/plan-summary.png" alt="Finished plan with the verdict Usable, the summary, its follow-ups, budget bar and run graph"> |
 
 <p align="center">
   <img src="assets/board-mobile.png" alt="The same board on a phone" width="320">
@@ -240,7 +240,8 @@ Environment overrides: `PROMPTWERK_CONFIG`, `PROMPTWERK_DATA_DIR`, `PROMPTWERK_C
 
 **Knowledge.** The planner reads `knowledge/personas.md` and `knowledge/conventions.md`, plus
 your own `knowledge/house-rules.md` and `knowledge/tools.json` and an optional profile per
-project in `knowledge/projects/`. Your versions are gitignored. `knowledge/check-commands.json`
+project in `knowledge/projects/`. Copy `house-rules.example.md` to start; `tools.json` is written
+by `bin/tools.py refresh`. Your versions are gitignored. `knowledge/check-commands.json`
 (`{"<project folder name>": "<command>"}`) overrides the derived check command of a project.
 
 **Helper commands.**
