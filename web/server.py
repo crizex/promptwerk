@@ -62,6 +62,12 @@ CSP = ("default-src 'self'; img-src 'self' data:; style-src 'self'; script-src '
        "font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; "
        "form-action 'self'")
 SUMMARIES = set()  # plans whose summary is being written right now
+# Finished plans the state carries. Older ones stay on disk but are not sent: every plan with
+# its summary went over the wire every two seconds, and that grows without end.
+VISIBLE = 20
+# Summary fields the plan card already has from the plan itself, or that no card reads.
+SUMMARY_DUPLICATES = ("plan", "topic", "rationale", "constraints", "goal",
+                      "clarification_answers", "cwd", "finish", "promises")
 
 
 # ---------------------------------------------------------------- password
@@ -142,6 +148,7 @@ def generations():
         stage = [z for z in log.splitlines() if z.startswith("Stage ")]
         out.append({"id": g["id"], "topic": g.get("topic", "")[:300],
                     "project": g.get("project", ""), "started": g.get("started"),
+                    "from_plan": g.get("from_plan"),
                     "running": pid_alive(g.get("pid")), "stage": stage[-1] if stage else "",
                     "log": log})
     return out
@@ -152,6 +159,7 @@ def draft_card(name):
     pw = d.get("_promptwerk") or {}
     return {"name": name, "topic": d.get("topic"), "rationale": d.get("rationale"),
             "project": pw.get("project", ""), "findings": pw.get("open_findings") or [],
+            "from_plan": pw.get("from_plan"),
             "clarifications": d.get("clarifications") or [],
             "attachments": pw.get("attachments") or [],
             "runs": [{k: r.get(k) for k in ("id", "title", "mode", "effort", "budget_usd",
@@ -173,12 +181,20 @@ def plan_card(name, metas):
                      "needs": r.get("needs") or [], "status": m.get("status") or "queued",
                      "run_id": m.get("run_id"), "cost_usd": m.get("cost_usd") or 0,
                      "note": m.get("note") or "", "question": m.get("question"),
-                     "last_tool": m.get("last_tool"), "last_target": m.get("last_target")})
+                     "last_tool": m.get("last_tool"), "last_target": m.get("last_target"),
+                     "started": m.get("started"),
+                     "check_code": (m.get("check") or {}).get("code"),
+                     "check_reason": (m.get("check_correction") or {}).get("reason"),
+                     "denials": len(m.get("denials") or [])})
     side = lambda s: config.read_json(path.replace(".json", s))  # noqa: E731
+    pw = plan.get("_promptwerk") or {}
+    summary = side(".summary.json")
+    if isinstance(summary, dict):
+        summary = {k: v for k, v in summary.items() if k not in SUMMARY_DUPLICATES}
     return {"name": name, "topic": plan.get("topic"), "rationale": plan.get("rationale"),
-            "goal": (plan.get("_promptwerk") or {}).get("topic_raw", ""), "runs": runs,
-            "summary": side(".summary.json"), "finish": side(".finish.json"),
-            "approved": (plan.get("_promptwerk") or {}).get("approved"),
+            "goal": pw.get("topic_raw", ""), "runs": runs, "from_plan": pw.get("from_plan"),
+            "summary": summary, "finish": side(".finish.json"),
+            "approved": pw.get("approved"),
             "closed": os.path.exists(path.replace(".json", ".closed.json")),
             "summarizing": name in SUMMARIES}
 
@@ -218,13 +234,41 @@ def without_deploy():
     return [p for p in C["projects"] if not os.path.isfile(os.path.join(folder, config.slug(p) + ".sh"))]
 
 
+def active(p):
+    return not p["closed"] and any(r["status"] not in ("done", "incomplete", "discarded") for r in p["runs"])
+
+
+def successors(plans, drafts, gens):
+    """Follow-up work per origin plan: drafts, queued plans and planner calls that name it."""
+    out = {}
+    for d in drafts:
+        if d.get("from_plan"):
+            out.setdefault(d["from_plan"], []).append({"name": d["name"], "topic": d["topic"], "where": "draft"})
+    for p in plans:
+        if p["from_plan"]:
+            where = "plan" if any(r["run_id"] for r in p["runs"]) else "queued"
+            out.setdefault(p["from_plan"], []).append({"name": p["name"], "topic": p["topic"], "where": where})
+    for g in gens:
+        if g.get("from_plan") and g["running"]:
+            out.setdefault(g["from_plan"], []).append({"name": g["id"], "topic": g["topic"], "where": "generating"})
+    return out
+
+
 def state():
     metas = all_metas()
     plans = [plan_card(n, metas) for n in listing(QUEUE) if n.count(".") == 1]
+    drafts = [draft_card(n) for n in listing(DRAFTS)]
+    gens = generations()
+    after = successors(plans, drafts, gens)
+    for p in plans:
+        p["successors"] = after.get(p["name"], [])
+    seven = week(metas, plans)  # before trimming: the week counts every plan
+    newest = sorted(plans, key=lambda p: p["approved"] or 0, reverse=True)
+    keep = {p["name"] for i, p in enumerate(newest) if i < VISIBLE or active(p)}
     return {"worker": config.read_json(os.path.join(LOGS, "worker.json")) or {},
-            "ui": ui_version(), "week": week(metas, plans), "without_deploy": without_deploy(),
-            "projects": C["projects"], "generations": generations(),
-            "drafts": [draft_card(n) for n in listing(DRAFTS)], "plans": plans,
+            "ui": ui_version(), "week": seven, "without_deploy": without_deploy(),
+            "projects": C["projects"], "generations": gens, "drafts": drafts,
+            "plans": [p for p in plans if p["name"] in keep], "plans_total": len(plans),
             "today_usd": round(sum(float(m.get("cost_usd") or 0) for m in metas
                                    if str(m.get("started", "")).startswith(time.strftime("%Y-%m-%d"))), 2),
             "daily_cap_usd": C["budgets"]["daily_cap_usd"]}
@@ -313,10 +357,14 @@ def planner_done(p, gid, topic):
                     "draft_failed", {"id": gid})
 
 
-def start_planner(gid, topic, project, files):
+def start_planner(gid, topic, project, files, from_plan=None):
     for d in (LOGS, DRAFTS):
         os.makedirs(d, exist_ok=True)
-    args = [os.path.join(BIN, "planner.py"), "--project", project, "--id", gid]
+    args = [os.path.join(BIN, "planner.py"), "--id", gid]
+    if project:  # empty: the planner infers the project from the text
+        args += ["--project", project]
+    if from_plan:
+        args += ["--from-plan", from_plan]
     if files:
         args += ["--attach", *files]
     args += ["--", topic]  # a topic starting with "-" must not be read as an option
@@ -326,16 +374,21 @@ def start_planner(gid, topic, project, files):
     threading.Thread(target=planner_done, args=(p, gid, topic), daemon=True).start()
     config.write_json(os.path.join(LOGS, f"gen-{gid}.json"),
                       {"id": gid, "topic": topic, "project": project, "files": files,
-                       "pid": p.pid, "started": time.time()})
+                       "from_plan": from_plan, "pid": p.pid, "started": time.time()})
 
 
 def do_generate(body):
     topic = str(body.get("topic") or "").strip()
     if len(topic) < 8:
         raise Refused(400, "Describe the task in at least one sentence.")
-    project = os.path.abspath(os.path.expanduser(str(body.get("project") or "")))
-    if project not in C["projects"]:
-        raise Refused(400, "Pick a project from the configured list (config: projects).")
+    project = str(body.get("project") or "").strip()
+    if project:  # optional; approval still checks every run's cwd against the list
+        project = os.path.abspath(os.path.expanduser(project))
+        if project not in C["projects"]:
+            raise Refused(400, "Pick a project from the configured list (config: projects).")
+    origin = None
+    if body.get("origin"):
+        origin, _ = plan_path({"plan": body["origin"]})
     files = body.get("attachments") or []
     if len(files) > MAX_FILES:
         raise Refused(400, f"At most {MAX_FILES} attachments.")
@@ -376,7 +429,7 @@ def do_generate(body):
         except OSError as e:  # disk full or similar: no half-written folder left behind
             shutil.rmtree(folder, ignore_errors=True)
             raise Refused(500, f"Could not store the attachments: {e.strerror or e}")
-    start_planner(gid, topic, project, paths)
+    start_planner(gid, topic, project, paths, origin)
     return {"id": gid}
 
 
@@ -446,13 +499,24 @@ def do_cancel(body):
     return {"ok": True}
 
 
+def dir_busy(meta):
+    """Refuse when another run works or waits in this run's directory. Answer and resume
+    start run.py from here, so they need the same exclusion as the worker."""
+    import worker
+    others = worker.others_in_dir(meta, worker.all_metas())
+    if others:
+        raise Refused(409, f"Run '{others[0]['run_id']}' ({others[0]['status'].replace('_', ' ')}) "
+                           "works in this directory. Try again when it is done.")
+    # a run waiting for an answer holds its own lock; for any other run a held lock is foreign
+    if not worker.lock(meta["cwd"]) and meta.get("status") != "waiting_for_answer":
+        raise Refused(409, "The worker just started a run in this directory. Try again when it is done.")
+
+
 def do_resume(body):
     rid, meta = meta_of(body)
     if meta.get("status") not in RESUMABLE:
         raise Refused(409, f"status '{meta.get('status')}' cannot be resumed")
-    import worker
-    if not worker.lock(meta["cwd"]):
-        raise Refused(409, "Another run works in this directory. Try again when it is done.")
+    dir_busy(meta)
     spawn([os.path.join(BIN, "run.py"), "resume", rid])
     return {"ok": True}
 
@@ -462,6 +526,7 @@ def do_answer(body):
     text = str(body.get("text") or "").strip()
     if meta.get("status") != "waiting_for_answer" or not text:
         raise Refused(409, "this run is not waiting for an answer")
+    dir_busy(meta)
     spawn([os.path.join(BIN, "run.py"), "answer", rid, text])
     return {"ok": True}
 
@@ -563,7 +628,7 @@ def do_gen_retry(body):
     gid, g = gen_of(body)
     if pid_alive(g.get("pid")):
         raise Refused(409, "still running")
-    start_planner(gid, g["topic"], g["project"], g.get("files") or [])
+    start_planner(gid, g["topic"], g["project"], g.get("files") or [], g.get("from_plan"))
     return {"ok": True}
 
 

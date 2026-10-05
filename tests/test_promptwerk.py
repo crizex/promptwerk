@@ -359,6 +359,79 @@ class Server(unittest.TestCase):
         self.assertEqual(head("shot.png"), ("image/png", None))
         self.assertEqual(head("evil.svg"), ("application/octet-stream", "attachment"))
 
+    def wait_for(self, path, tries=100):
+        for _ in range(tries):
+            if os.path.exists(path):
+                return config.read_json(path)
+            time.sleep(0.1)
+        self.fail(f"{path} did not appear")
+
+    def test_generate_without_project_and_as_follow_up(self):
+        os.makedirs(os.path.join(DATA, "queue"), exist_ok=True)
+        config.write_json(os.path.join(DATA, "queue", "o1.json"), example_plan())
+        self.assertEqual(self.req("/api/generate", {"topic": "Follow up on that", "origin": "nope.json"})[0], 404)
+        code, out = self.req("/api/generate", {"topic": "Add a filter for done todos", "origin": "o1.json"})
+        self.assertEqual(code, 200, out)
+        draft = self.wait_for(os.path.join(DATA, "drafts", out["id"] + ".json"))
+        self.assertEqual(draft["_promptwerk"]["project"], "")
+        self.assertEqual(draft["_promptwerk"]["from_plan"], "o1.json")
+        self.assertEqual(draft["runs"][0]["cwd"], PROJECT)  # inferred from the knowledge block
+        plan = next(p for p in self.req("/api/state")[1]["plans"] if p["name"] == "o1.json")
+        self.assertEqual(plan["successors"], [{"name": out["id"] + ".json", "topic": draft["topic"], "where": "draft"}])
+        os.unlink(os.path.join(DATA, "drafts", out["id"] + ".json"))
+        os.unlink(os.path.join(DATA, "queue", "o1.json"))
+
+    def test_state_keeps_newest_finished_plans_and_active_ones(self):
+        q = os.path.join(DATA, "queue")
+        os.makedirs(q, exist_ok=True)
+        names = []
+        for i in range(23):
+            plan = example_plan()
+            plan["_promptwerk"] = {"approved": 1000 + i}
+            names.append(f"old{i:02}.json")
+            config.write_json(os.path.join(q, names[-1]), plan)
+            if i:
+                config.write_json(os.path.join(q, f"old{i:02}.closed.json"), {"closed": 1})
+            config.write_json(os.path.join(q, f"old{i:02}.summary.json"),
+                              {"goal_met": {"state": "yes"}, "topic": "x", "promises": [1]})
+        s = self.req("/api/state")[1]
+        shown = {p["name"] for p in s["plans"]}
+        self.assertIn("old00.json", shown)  # oldest, but not closed and nothing ran: active
+        self.assertNotIn("old01.json", shown)
+        self.assertLessEqual(len(shown & set(names)), 21)
+        self.assertGreaterEqual(s["plans_total"], 23)
+        card = next(p for p in s["plans"] if p["name"] == "old22.json")
+        self.assertEqual(card["summary"], {"goal_met": {"state": "yes"}})
+        for n in os.listdir(q):
+            if n.startswith("old"):
+                os.unlink(os.path.join(q, n))
+
+    def test_answer_and_resume_refused_while_another_run_works_in_the_dir(self):
+        config.write_json(os.path.join(DATA, "queue", "d1.json"), example_plan())
+        made = []
+        for rid, status, extra in (("d1-a", "waiting_for_answer", {}), ("d1-b", "running", {}),
+                                   ("d1-c", "check_failed", {"check": {"code": 1},
+                                    "check_correction": {"reason": "npm test does not exist"},
+                                    "denials": ["git push", "rm -rf /"]})):
+            os.makedirs(os.path.join(DATA, "runs", rid), exist_ok=True)
+            config.write_json(os.path.join(DATA, "runs", rid, "meta.json"),
+                              {"run_id": rid, "plan": "d1.json", "key": rid[-1], "status": status,
+                               "cwd": PROJECT, "started": "2026-01-01T00:00:0" + rid[-1], **extra})
+            made.append(rid)
+        code, out = self.req("/api/answer", {"run_id": "d1-a", "text": "Day only"})
+        self.assertEqual(code, 409)
+        self.assertIn("d1-b", out["error"])
+        self.assertEqual(self.req("/api/resume", {"run_id": "d1-c"})[0], 409)
+        plan = example_plan()
+        plan["runs"][0]["id"] = "c"
+        config.write_json(os.path.join(DATA, "queue", "d1.json"), plan)
+        run = next(p for p in self.req("/api/state")[1]["plans"] if p["name"] == "d1.json")["runs"][0]
+        self.assertEqual((run["check_reason"], run["denials"], run["check_code"]), ("npm test does not exist", 2, 1))
+        for rid in made:
+            shutil.rmtree(os.path.join(DATA, "runs", rid))
+        os.unlink(os.path.join(DATA, "queue", "d1.json"))
+        shutil.rmtree(os.path.join(DATA, "runs", ".locks"), ignore_errors=True)
+
     def test_path_traversal(self):
         for path in ("/api/run/..%2F..%2Fetc", "/api/artifact/x/..", "/api/artifact/..%2F..%2F/x",
                      "/fonts/..%2F..%2Fbin%2Fconfig.py"):

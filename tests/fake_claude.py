@@ -46,6 +46,8 @@ if schema is not None:
         with open(os.path.join(ROOT, "examples", "todo-plan.json"), encoding="utf-8") as f:
             plan = json.load(f)
         m = re.search(r"The user selected this project: `([^`]+)`", prompt)
+        if not m:  # no project picked: "infer" the first one the knowledge block lists
+            m = re.search(r"^## (/\S+)$", prompt, re.M)
         cwd = m.group(1) if m else os.getcwd()
         for r in plan["runs"]:
             r["cwd"] = cwd

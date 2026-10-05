@@ -102,6 +102,12 @@ def lock(path):
         return False
 
 
+def others_in_dir(meta, metas):
+    """Other runs that work or wait for an answer in the directory of 'meta'."""
+    return [m for m in metas if m["run_id"] != meta.get("run_id")
+            and m["status"] in ACTIVE and config.slug(m["cwd"]) == config.slug(meta["cwd"])]
+
+
 def clean_locks(metas):
     """A lock belongs to the run, not to the worker pass: it falls only when no run in that
     directory is running, checking or waiting for an answer."""

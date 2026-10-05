@@ -153,12 +153,29 @@ def new_id():
     return datetime.datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + secrets.token_hex(3)
 
 
+def origin_block(name):
+    """A follow-up knows what its origin plan wanted and what its summary left open."""
+    if not name:
+        return ""
+    path = os.path.join(config.QUEUE, os.path.basename(name))
+    plan = config.read_json(path) or {}
+    s = config.read_json(path.replace(".json", ".summary.json")) or {}
+    lines = [f"# FOLLOW-UP OF `{os.path.basename(name)}`", "",
+             f"Its goal was: {(plan.get('_promptwerk') or {}).get('topic_raw') or plan.get('topic') or '?'}"]
+    if s.get("verdict"):
+        lines.append(f"Its summary: {s['verdict']}")
+    lines += [f"- still missing ({m.get('who')}): {m.get('what')}" for m in s.get("missing") or []]
+    lines.append("Plan only what is still open; do not redo what the origin plan finished.")
+    return "\n".join(lines)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("topic", nargs="?")
     ap.add_argument("--project", default="")
     ap.add_argument("--attach", nargs="*", default=[])
     ap.add_argument("--id", default="")
+    ap.add_argument("--from-plan", default="", help="queued plan this task follows up on")
     a = ap.parse_args()
     log(f"PID: {os.getpid()}")
     topic = a.topic if a.topic is not None else sys.stdin.read()
@@ -171,7 +188,8 @@ def main():
     tools = "Read" if a.attach else ""
 
     log("Stage A: draft")
-    context = "\n\n".join(x for x in (knowledge_block(project), project_block(project)) if x)
+    context = "\n\n".join(x for x in (knowledge_block(project), project_block(project),
+                                      origin_block(a.from_plan)) if x)
     plan = claude("\n\n".join(x for x in (read(META), context, "# USER TOPIC\n\n" + topic,
                                           attachment_block(a.attach)) if x), "xhigh", tools)
 
@@ -189,6 +207,7 @@ def main():
     rest = check_plan.check(plan)
     plan["_promptwerk"] = {
         "id": draft_id, "topic_raw": topic, "project": project, "open_findings": rest,
+        "from_plan": os.path.basename(a.from_plan) or None,
         # "<generation id>/<name>" so the UI can link /api/attachment/<gid>/<name>
         "attachments": ["%s/%s" % (os.path.basename(os.path.dirname(f)), os.path.basename(f))
                         for f in a.attach],
