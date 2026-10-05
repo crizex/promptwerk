@@ -14,6 +14,7 @@
   <div class="brand"><span class="mark" aria-hidden="true"></span>Promptwerk</div>
   <p class="worker" id="worker" aria-live="polite">Worker: no signal yet</p>
   <div class="counters" id="counters"></div>
+  <button class="button ghost small" id="paletteOpen" type="button" aria-keyshortcuts="Control+K Meta+K">Search <kbd>Ctrl K</kbd></button>
   <button class="button primary small" id="reload" type="button" hidden>New version: reload</button>
 </header>
 
@@ -24,27 +25,38 @@
   </section>
 
   <form class="compose" id="compose">
-    <label class="field">
+    <fieldset class="modes">
+      <legend class="sr">What to make</legend>
+      <label><input type="radio" name="mode" value="plan" checked> Work in a project</label>
+      <label><input type="radio" name="mode" value="prompt"> Only write a prompt</label>
+    </fieldset>
+    <label class="field" id="projectField">
       <span>Project</span>
-      <select id="project" required></select>
+      <select id="project"></select>
       <small class="hint" id="deployHint" aria-live="polite"></small>
     </label>
+    <p class="origin" id="origin" hidden></p>
     <label class="field grow">
       <span>What should happen?</span>
-      <textarea id="topic" rows="4" required minlength="8"
+      <textarea id="topic" rows="4" required minlength="8" aria-keyshortcuts="N"
         placeholder="e.g. Add due dates to todos and show overdue ones in red"></textarea>
     </label>
+    <section class="reading" id="readingBox" aria-label="How I read this" hidden>
+      <h2>How I read this</h2>
+      <p class="reading-text" id="reading"></p>
+      <dl class="reading-sum" id="readingSum"></dl>
+    </section>
     <div class="row">
       <label class="button ghost" for="files">Attach files</label>
       <input type="file" id="files" multiple hidden>
       <ul class="files" id="filelist" aria-label="Attached files"></ul>
       <button type="submit" class="button primary" id="generate">Generate plan</button>
     </div>
-    <p class="hint">Paste screenshots or drop files here. Ctrl+Enter also generates. Nothing runs until you approve the draft.</p>
+    <p class="hint">Paste screenshots or drop files here. Ctrl+Enter also generates, N jumps here. Nothing runs until you approve the draft.</p>
     <p class="error" id="composeError" role="alert"></p>
   </form>
 
-  <section id="generations" class="stack"></section>
+  <section id="generations" class="stack" aria-label="Workshop"></section>
 
   <div class="lanes">
     <section class="lane">
@@ -60,15 +72,28 @@
       <div id="done" class="stack"></div>
     </section>
   </div>
+
+  <section class="prompts" id="promptsBox" hidden>
+    <h2>Prompts <span class="count" id="nPrompts"></span></h2>
+    <div id="prompts" class="grid"></div>
+  </section>
 </main>
 
-<dialog id="detail" aria-labelledby="detailTitle">
+<dialog id="detail" class="drawer" aria-labelledby="detailTitle">
   <div class="detail-head">
     <h2 id="detailTitle"></h2>
     <button class="button ghost" id="closeDetail" type="button">Close</button>
   </div>
   <div id="detailBody"></div>
 </dialog>
+
+<dialog id="palette" class="palette" aria-label="Command palette">
+  <input id="paletteInput" type="text" role="combobox" aria-expanded="true" aria-controls="paletteList"
+    aria-autocomplete="list" autocomplete="off" placeholder="Jump to a plan, draft or prompt, or start a new task">
+  <ul id="paletteList" role="listbox" aria-label="Results"></ul>
+</dialog>
+
+<div class="toasts" id="toasts" role="status" aria-live="polite"></div>
 
 <footer class="foot">Promptwerk. Not affiliated with Anthropic. Claude is a trademark of Anthropic.</footer>
 </body>
