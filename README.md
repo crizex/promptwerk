@@ -220,7 +220,7 @@ key has a default except `projects`.
 | `data_dir` | `~/.local/share/promptwerk` | Drafts, queue, runs, logs, attachments |
 | `knowledge_dir` | `<repo>/knowledge` | Personas, conventions, house rules, project profiles |
 | `projects` | `[]` | Directories runs may work in |
-| `model` | `claude-opus-5-5` | Model for planner, runs and summary; a run may override it |
+| `model` | `opus` | Model for planner, runs and summary (Claude Code alias or full model ID); a run may override it |
 | `claude_bin` | `claude` | Claude Code CLI binary |
 | `models.cheap` | empty | Optional cheaper model for simple runs, escalated once to `model` on failure |
 | `budgets.planner_usd` | `8.0` | Cap per planner call |

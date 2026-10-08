@@ -3,6 +3,12 @@
 All notable changes to Promptwerk. Versions follow [Semantic Versioning](https://semver.org/).
 Downloads are on the [releases page](https://github.com/crizex/promptwerk/releases).
 
+## 1.4.2
+
+- The default model is now the Claude Code alias `opus` instead of a fixed model ID, so new
+  Opus versions are used without a config change. `config.example.toml` suggests `sonnet` for
+  `models.cheap`. A full ID such as `claude-opus-5-5` still works if you want to pin a version.
+
 ## 1.4.1
 
 - The detail drawer now opens at the top. Before, it kept the scroll position of the previous

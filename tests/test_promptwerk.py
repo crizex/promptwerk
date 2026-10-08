@@ -319,7 +319,7 @@ class CheapModel(unittest.TestCase):
         meta = config.read_json(os.path.join(DATA, "runs", rid, "meta.json"))
         self.assertEqual(meta["status"], "check_failed")
         self.assertEqual(meta["escalated"]["from"], "claude-sonnet-5-5")
-        self.assertEqual(meta["model"], "claude-opus-5-5")
+        self.assertEqual(meta["model"], "opus")
         self.assertNotIn("resumes", meta)  # the worker's own retry is still available
         shutil.rmtree(os.path.join(DATA, "runs", rid))
         os.unlink(path)

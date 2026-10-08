@@ -16,7 +16,7 @@ DEFAULTS = {
     "data_dir": "~/.local/share/promptwerk",
     "knowledge_dir": "",          # empty: <repo>/knowledge
     "projects": [],               # absolute project dirs a run may use as cwd
-    "model": "claude-opus-5-5",
+    "model": "opus",  # Claude Code alias, always the newest Opus
     # Optional cheaper model the planner may give to simple runs. Empty = off.
     "models": {"cheap": ""},
     "claude_bin": "claude",
